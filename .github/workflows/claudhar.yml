@@ -30,8 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # The license check compares against the Azahar import commit.
+          fetch-depth: 0
           persist-credentials: false
           submodules: recursive
+      - name: Check license notices
+        run: python3 tools/claudhar/check_license_headers.py
       - name: Install build tools
         run: |
           sudo apt-get update
