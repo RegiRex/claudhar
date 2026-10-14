@@ -356,7 +356,7 @@ settings.
 
 | Phase | Delivers | Done when |
 |---|---|---|
-| **0. Groundwork** | New repository and CI (direct APK). A device-probe screen that records Vulkan features, blend-variant creation cost, core layout, displays and controllers. Stock Azahar baselines on your devices. | Probe results from the Thor and the Duo. Blending method chosen (Section 4.2). |
+| **0. Groundwork** | New repository and CI (direct APK). A device-probe screen that records Vulkan features, blend-variant creation cost, core layout, displays and controllers. Stock Azahar baselines on your devices. | Probe results from the Thor. Blending method chosen (Section 4.2), with method B as the fallback any driver can use. The Duo's probe, when it arrives, confirms or narrows the choice before Phase 2 is tested on it. |
 | **1. New core on reused parts** | Rewritten main loop, timing, job system, PICA thread (Accurate mode first), DSP thread, presenter. Azahar services and loader adapted. Bring-up renderer: CPU mode, single-threaded. | Homebrew and Dark Moon boot and play at reduced speed with both screens, controls and audio. `skipped = 0`, `compile_waits = 0`. |
 | **2. Hybrid mode** | Precompiled ubershader Vulkan backend, "Preparing graphics" screen, one host format, render-pass merging. | Cold first run of Dark Moon with no compile pauses (counter 0) and no skipped draws. Speed compared with Azahar. |
 | **3. Multicore pipeline** | Asynchronous PICA with guest-time completion and page protection; geometry and texture jobs; performance-hint session; per-game Accurate fallback. | Measured frame-time gain over Phase 2 and over Azahar on the Thor. Thread activity shows the planned spread. |
@@ -415,8 +415,11 @@ design can remove.
    is green.
 2. **Platform scope:** Android ARM64 only. Linux builds are used for CI tests and the
    probe tool. Windows, macOS, OpenGL and the Qt desktop app are not built.
-3. **Test devices:** AYN Thor and Retroid Pocket Duo. The Duo confirms the minimum
-   targets; the RG DDS stays in the device table plan but has no tester yet.
+3. **Test devices:** AYN Thor now; Retroid Pocket Duo expected within one to two
+   weeks. Until then, choices made from the Thor's report keep method B (Section 4.2)
+   available, since the Duo's Adreno 722 may lack features the Thor's Adreno 740 has.
+   The Duo confirms the minimum targets when it arrives. The RG DDS stays in the
+   device table plan but has no tester yet.
 4. **Preparation screen:** accepted. A one-time "Preparing graphics" step on first
    launch and after app or driver updates, in exchange for no pauses during play.
 
