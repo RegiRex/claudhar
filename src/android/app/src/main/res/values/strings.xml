@@ -2,7 +2,8 @@
 <resources>
 
     <!-- General application strings -->
-    <string name="app_name" translatable="false">Azahar</string>
+    <!-- Claudhar: the app is named Claudhar so it is told apart from Azahar. -->
+    <string name="app_name" translatable="false">Claudhar</string>
     <string name="app_disclaimer">This software will run applications for the Nintendo 3DS handheld game console. No game titles are included.\n\nBefore you can begin with emulating, please select a folder to store Azahar\'s user data in.\n\nWhat\'s this:\n<a href='https://github.com/azahar-emu/azahar/wiki/Android-User-Data-and-Storage'>Wiki - Citra Android user data and storage</a></string>
     <string name="app_notification_channel_name" translatable="false">Azahar</string>
     <string name="app_notification_channel_id" translatable="false">Azahar</string>
@@ -1109,8 +1110,9 @@
     <string name="no_preference">No Preference</string>
 
     <!-- Update Checker -->
-    <string name="stable_channel_update_link" translatable="false">https://azahar-emu.org/pages/download/</string>
-    <string name="prerelease_channel_update_link" translatable="false">https://github.com/azahar-emu/azahar/releases</string>
+    <!-- Claudhar: updates come from Claudhar's own releases, not Azahar's. -->
+    <string name="stable_channel_update_link" translatable="false">https://github.com/RegiRex/claudhar/releases</string>
+    <string name="prerelease_channel_update_link" translatable="false">https://github.com/RegiRex/claudhar/releases</string>
     <string name="update_available">Update Available</string>
     <string name="update_available_description">A newer version of Azahar is available (version %1$s).\nWould you like to download it?</string>
     <string name="check_for_updates">Check For Updates</string>

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Claudhar: dark blue behind the white ic_claudhar mark, on the launcher
+         icon and the splash screen. Azahar used white behind its own logo. -->
+    <color name="ic_launcher_background">#2B4C7E</color>
 </resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 Claudhar Project
+     Licensed under GPLv2 or any later version
+     Refer to the license.txt file included.
+
+     Claudhar launcher and splash mark: the 3DS top screen (5:3) above the bottom
+     screen (4:3), drawn inside the 72dp safe zone of a 108dp adaptive icon. It
+     replaces Azahar's mark so the two apps are easy to tell apart on a launcher. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Top screen. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,27H72A4,4 0,0 1,76 31V49A4,4 0,0 1,72 53H36A4,4 0,0 1,32 49V31A4,4 0,0 1,36 27Z" />
+    <!-- Bottom screen. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,57H66A4,4 0,0 1,70 61V77A4,4 0,0 1,66 81H42A4,4 0,0 1,38 77V61A4,4 0,0 1,42 57Z" />
+</vector>

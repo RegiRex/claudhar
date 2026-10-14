@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Claudhar: the splash shows the Claudhar mark on the launcher icon's
+         background instead of Azahar's logo on its surface color. -->
     <style name="Theme.Citra.Splash.Main" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/citra_surface_blue</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_citra</item>
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_claudhar</item>
         <item name="postSplashScreenTheme">@style/Theme.Citra.Blue</item>
     </style>
 

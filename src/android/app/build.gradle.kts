@@ -61,9 +61,9 @@ android {
     }
 
     defaultConfig {
-        // The application ID refers to Lime3DS to allow for
-        // the Play Store listing, which was originally set up for Lime3DS, to still be used.
-        applicationId = "org.azahar_emu.azahar"
+        // Claudhar: a separate application ID so Claudhar installs next to Azahar
+        // and Uberhar with its own data, instead of replacing either of them.
+        applicationId = "io.github.regirex.claudhar"
         minSdk = 29
         targetSdk = 37
         versionCode = autoVersion
@@ -177,10 +177,11 @@ android {
             dimension = "version"
             versionNameSuffix = "-vanilla"
         }
+        // Claudhar: the Play Store flavor keeps the Claudhar application ID.
+        // Azahar's flavor used its Play Store ID, which would replace Azahar.
         register("googlePlay") {
             dimension = "version"
             versionNameSuffix = "-googleplay"
-            applicationId = "io.github.lime3ds.android"
         }
     }
 
