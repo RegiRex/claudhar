@@ -1,10 +1,12 @@
 name: citra-format
 
+# Claudhar: also check claude/ working branches ("*" does not match a "/") and
+# pull requests to main, Claudhar's default branch.
 on:
   push:
-    branches: [ "*" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   clang-format:

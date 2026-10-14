@@ -1,0 +1,218 @@
+# Copyright 2026 Claudhar Project
+# Licensed under GPLv2 or any later version
+# Refer to the license.txt file included.
+#
+# Claudhar CI: builds the ARM64 Android test APK as a direct download and runs the
+# C++ tests on Linux, for every push to main or a claude/ working branch.
+# It never publishes a release.
+name: Claudhar
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main', 'claude/**']
+  pull_request:
+    branches: ['main']
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only the newest push on a branch matters for testing.
+  group: claudhar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Compile the emulator core for Linux and run its C++ test suite.
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          # The Vulkan platform code includes the Xlib and Wayland surface headers.
+          # Lavapipe (mesa-vulkan-drivers) gives the probe a CPU Vulkan device.
+          sudo apt-get install -y ccache ninja-build libx11-dev libxext-dev \
+            libwayland-dev mesa-vulkan-drivers
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/ccache
+          key: claudhar-native-v1-${{ github.run_id }}
+          restore-keys: claudhar-native-v1-
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_TESTS=ON -DENABLE_ROOM=OFF \
+            -DENABLE_WEB_SERVICE=OFF -DENABLE_SCRIPTING=OFF -DENABLE_CUBEB=OFF \
+            -DENABLE_OPENAL=OFF -DENABLE_LIBUSB=OFF -DENABLE_OPENGL=OFF \
+            -DENABLE_VULKAN=ON -DENABLE_LTO=OFF
+      - name: Build
+        run: ninja -C build
+      - name: Run C++ tests
+        run: ctest --test-dir build --output-on-failure -j4
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ccache
+          key: claudhar-native-v1-${{ github.run_id }}
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      # True when the owner has stored a permanent signing key as repository secrets.
+      HAS_KEY_SECRET: ${{ secrets.CLAUDHAR_KEYSTORE_B64 != '' }}
+      # Outside the checkout, at the same absolute path every run for the cache.
+      KEYSTORE: /home/runner/.android/claudhar.keystore
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Restore build caches
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: claudhar-android-v1-${{ github.run_id }}
+          restore-keys: claudhar-android-v1-
+
+      # Every build must be signed with the same key, or a new APK cannot install
+      # over the previous one. The repository secrets CLAUDHAR_KEYSTORE_B64 and
+      # CLAUDHAR_KEYSTORE_PASS hold a permanent key when set. Otherwise the key
+      # made by the first main-branch build is kept in the Actions cache, which
+      # every branch can read; only main saves it, so branches never fork the key.
+      - name: Restore cached signing key
+        id: key
+        if: env.HAS_KEY_SECRET != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.KEYSTORE }}
+          key: claudhar-signing-v1
+      - name: Prepare signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.CLAUDHAR_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.CLAUDHAR_KEYSTORE_PASS }}
+          CACHE_HIT: ${{ steps.key.outputs.cache-hit }}
+        run: |
+          mkdir -p "$(dirname "$KEYSTORE")"
+          if [[ "$HAS_KEY_SECRET" == "true" ]]; then
+            base64 --decode <<< "$KEYSTORE_B64" > "$KEYSTORE"
+            echo "KEY_PASS=$KEYSTORE_PASS" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=claudhar" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "KEY_PASS=android" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=claudhartest" >> "$GITHUB_ENV"
+          if [[ "$CACHE_HIT" != "true" ]]; then
+            "$JAVA_HOME_17_X64/bin/keytool" -genkeypair -noprompt -keystore "$KEYSTORE" \
+              -storepass android -alias claudhartest -keypass android -keyalg RSA \
+              -keysize 2048 -validity 10000 -dname "CN=Claudhar Test,O=Claudhar,C=US"
+            echo '::warning title=New Claudhar signing key::This APK is signed with a new test key. Uninstall any earlier Claudhar build before installing it.'
+          fi
+      - name: Save signing key
+        if: env.HAS_KEY_SECRET != 'true' && steps.key.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.KEYSTORE }}
+          key: claudhar-signing-v1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724" "cmake;3.30.3"
+
+      - name: Build Android ARM64
+        working-directory: src/android
+        run: |
+          set -o pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64" NDK_CCACHE="$(command -v ccache)"
+          export ANDROID_KEYSTORE_FILE="$KEYSTORE" ANDROID_KEYSTORE_PASS="$KEY_PASS"
+          export ANDROID_KEY_ALIAS="$KEY_ALIAS"
+          bash ./gradlew --no-daemon assembleVanillaRelease 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      # Check the package identity and signature, and name the APK after the run.
+      - name: Validate package
+        id: package
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          mkdir -p artifacts
+          SHA="$(git rev-parse --short=9 HEAD)"
+          APK="artifacts/claudhar-${{ github.run_number }}-$SHA-arm64.apk"
+          cp "$(find src/android/app/build/outputs/apk/vanilla/release -name '*.apk' -print -quit)" "$APK"
+          "$TOOLS/aapt" dump badging "$APK" > artifacts/package.txt
+          grep "package: name='io.github.regirex.claudhar'" artifacts/package.txt
+          grep -F "application-label:'Claudhar'" artifacts/package.txt
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
+          (cd artifacts && sha256sum "$(basename "$APK")" > apk-sha256.txt)
+          git rev-parse HEAD > artifacts/source-commit.txt
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+
+      # Upload the APK alone and unzipped so the download is the .apk itself.
+      # With archive: false the artifact is named after the file.
+      - name: Upload APK
+        id: upload_apk
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.package.outputs.apk }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload APK details
+        uses: actions/upload-artifact@v7
+        with:
+          name: claudhar-apk-details
+          path: |
+            artifacts/apk-sha256.txt
+            artifacts/package.txt
+            artifacts/signature.txt
+            artifacts/source-commit.txt
+          retention-days: 30
+
+      # Put a direct download link at the top of the run page.
+      - name: Link APK download
+        env:
+          ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
+        run: |
+          {
+            echo "### Claudhar test APK"
+            echo ""
+            echo "**[Download the Claudhar APK]($ARTIFACT_URL)** (the APK file itself, no unzipping)."
+            echo "It installs next to Azahar and Uberhar as a separate app."
+            echo "Use it only when the native-tests and android jobs of this run are both green."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: claudhar-build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Save build caches
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: claudhar-android-v1-${{ github.run_id }}
