@@ -238,6 +238,13 @@ object NativeLibrary {
 
     external fun areSystemTitlesInstalled(): BooleanArray
 
+    /**
+     * Claudhar: runs the native half of the Phase 0 device probe (CPU layout and speed,
+     * Vulkan features, pipeline build and shader costs) and returns its report text.
+     * Takes several seconds; call it off the main thread while no game is running.
+     */
+    external fun runDeviceProbe(): String
+
     external fun uninstallSystemFiles(old3DS: Boolean)
 
     external fun isFullConsoleLinked(): Boolean

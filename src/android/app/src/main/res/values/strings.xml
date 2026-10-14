@@ -20,6 +20,13 @@
     <string name="install_game_content">Install CIA file</string>
     <string name="install_game_content_description">Install applications, updates or DLC</string>
     <string name="share_log">Share Log</string>
+    <!-- Claudhar: the Phase 0 device probe on the home settings screen. -->
+    <string name="device_probe">Device probe</string>
+    <string name="device_probe_description">Measure this device\'s CPU, GPU, screens and controllers for Claudhar development</string>
+    <string name="device_probe_running">Measuring this device. This takes up to a minute; keep the app open.</string>
+    <string name="device_probe_share">Share</string>
+    <string name="device_probe_copy">Copy</string>
+    <string name="device_probe_copied">Report copied</string>
     <string name="share_log_description">Share Azahar\'s log file to debug issues</string>
     <string name="gpu_driver_manager">GPU Driver Manager</string>
     <string name="install_gpu_driver">Install GPU driver</string>

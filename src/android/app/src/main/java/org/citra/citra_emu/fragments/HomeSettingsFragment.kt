@@ -39,6 +39,7 @@ import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.model.Game
 import org.citra.citra_emu.model.HomeSetting
 import org.citra.citra_emu.ui.main.MainActivity
+import org.citra.citra_emu.utils.DeviceProbe
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GpuDriverHelper
 import org.citra.citra_emu.utils.Log
@@ -154,6 +155,13 @@ class HomeSettingsFragment : Fragment() {
                 R.string.share_log_description,
                 R.drawable.ic_share,
                 { shareLog() }
+            ),
+            // Claudhar: measures this device for the rebuild's design decisions.
+            HomeSetting(
+                R.string.device_probe,
+                R.string.device_probe_description,
+                R.drawable.ic_info_outline,
+                { DeviceProbe.start(requireActivity()) }
             ),
             HomeSetting(
                 R.string.gpu_driver_manager,

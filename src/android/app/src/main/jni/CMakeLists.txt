@@ -46,7 +46,10 @@ if (ENABLE_VULKAN)
     target_sources(citra-android PRIVATE
         emu_window/emu_window_vk.cpp
         emu_window/emu_window_vk.h
+        # Claudhar: the Phase 0 device probe's JNI entry.
+        claudhar_probe_jni.cpp
     )
+    target_link_libraries(citra-android PRIVATE claudhar_probe)
     if ("arm64" IN_LIST ARCHITECTURE)
         target_link_libraries(citra-android PRIVATE adrenotools)
     endif()

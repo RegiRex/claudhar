@@ -193,6 +193,10 @@ add_subdirectory(video_core)
 add_subdirectory(audio_core)
 add_subdirectory(network)
 add_subdirectory(input_common)
+# Claudhar: the rebuild's own modules (device probe first).
+if (ENABLE_VULKAN)
+    add_subdirectory(claudhar)
+endif()
 
 if (ENABLE_TESTS)
     add_subdirectory(tests)
