@@ -24,6 +24,7 @@
 #include <functional>
 #include <random>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
@@ -72,11 +73,15 @@ void main() {
 }
 )";
 
-/// A cut-down PICA fragment ubershader: texture combiner stages, lighting with two
-/// lookup tables, fog and alpha test, all chosen by data in a uniform buffer. With
-/// SPECIALIZED defined the same data is compile-time constant, which turns the same
-/// source into a specialized shader for the per-pixel cost comparison.
-constexpr const char* FragmentShader = R"(
+// The probe's fragment shaders are assembled from the pieces below:
+//   ubershader:  header + interface + UberConfig  + common + UberMain
+//   specialized: header + SpecializedConstants() + interface + common + UberMain
+//   compact:     header + interface + CompactConfig + common + CompactMain
+// The ubershader and the compact ubershader read the configuration from uniform
+// buffers; the specialized shader bakes the same configuration in as constants.
+
+/// Inputs from the vertex shader, the output, the textures and the lookup tables.
+constexpr const char* FragmentInterface = R"(
 layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec2 v_uv0;
 layout(location = 2) in vec2 v_uv1;
@@ -86,6 +91,10 @@ layout(location = 5) in vec3 v_view;
 layout(location = 0) out vec4 o_color;
 layout(set = 0, binding = 1) uniform sampler2D tex[3];
 layout(set = 0, binding = 2) uniform samplerBuffer lut;
+)";
+
+/// The ubershader's configuration: packed combiner stages decoded with switches.
+constexpr const char* UberConfig = R"(
 #ifndef SPECIALIZED
 layout(set = 0, binding = 0, std140) uniform Config {
     uvec4 stage_cfg[6];
@@ -96,7 +105,77 @@ layout(set = 0, binding = 0, std140) uniform Config {
     vec4 light_specular[8];
 };
 #endif
+)";
 
+/// The compact ubershader's configuration, decoded on the CPU into indices, masks
+/// and coefficients so the shader needs no switch per operand or operation.
+constexpr const char* CompactConfig = R"(
+layout(set = 0, binding = 3, std140) uniform Compact {
+    uvec4 c_src[6][2];    // [0].xyz color and [1].xyz alpha sources: candidate indices
+    vec4 c_rgb_sel[6][3]; // color operand channel weights; zero when it passes rgb through
+    vec4 c_rgb_pass[6];   // xyz: 1 when the color operand passes rgb through
+    vec4 c_rgb_inv[6];    // xyz: 1 when the color operand is 1 - x
+    vec4 c_a_sel[6][3];   // alpha operand channel weights
+    vec4 c_a_inv[6];      // xyz: 1 when the alpha operand is 1 - x
+    vec4 c_rgb_k[6][2];   // k0 a + k1 b + k2 c + k3 ab + k4 ac + k5 bc + k6; [1].w: dot3
+    vec4 c_a_k[6][2];     // the same for alpha
+    vec4 c_scale[6];      // x, y: color and alpha scale; z, w: 1 to update the buffer
+    vec4 stage_const[6];
+    uvec4 misc_cfg;
+    vec4 light_dir[8];
+    vec4 light_diffuse[8];
+    vec4 light_specular[8];
+};
+)";
+
+/// Lighting, fog and alpha test, shared by every probe fragment shader.
+constexpr const char* FragmentCommon = R"(
+// Per-light diffuse plus specular from two lookup tables (D0 and RR).
+void Lighting(out vec4 ld, out vec4 ls) {
+    vec3 n = normalize(v_normal);
+    vec3 view = normalize(v_view);
+    vec3 diffuse = vec3(0.1);
+    vec3 specular = vec3(0.0);
+    for (uint i = 0u; i < misc_cfg.y; ++i) {
+        vec3 l = normalize(light_dir[i].xyz);
+        float nl = max(dot(n, l), 0.0);
+        float d0 = texelFetch(lut, int(clamp(dot(n, normalize(l + view)), 0.0, 1.0) * 255.0)).r;
+        float rr = texelFetch(lut, 256 + int(clamp(dot(view, n), 0.0, 1.0) * 255.0)).r;
+        diffuse += light_diffuse[i].rgb * nl;
+        specular += light_specular[i].rgb * d0 * rr * nl;
+    }
+    ld = vec4(clamp(diffuse, 0.0, 1.0), 1.0);
+    ls = vec4(clamp(specular, 0.0, 1.0), 1.0);
+}
+
+// Fog, then the alpha test, which may discard the fragment.
+vec4 Finish(vec4 color) {
+    if (misc_cfg.w != 0u) {
+        float f = texelFetch(lut, 512 + int(clamp(gl_FragCoord.z, 0.0, 1.0) * 255.0)).r;
+        color.rgb = mix(vec3(0.5, 0.6, 0.7), color.rgb, f);
+    }
+    // Never true (fragment centers are never whole numbers), but makes each probe
+    // run's binary unique, so no driver cache can hide a cold compile.
+    if (gl_FragCoord.x == float(NONCE)) color.r = 1.0 - color.r;
+    bool pass;
+    switch (misc_cfg.z) {
+    case 0u: pass = false; break;
+    case 1u: pass = true; break;
+    case 2u: pass = color.a == 0.1; break;
+    case 3u: pass = color.a != 0.1; break;
+    case 4u: pass = color.a < 0.1; break;
+    case 5u: pass = color.a <= 0.1; break;
+    case 6u: pass = color.a > 0.1; break;
+    default: pass = color.a >= 0.1; break;
+    }
+    if (!pass) discard;
+    return color;
+}
+)";
+
+/// The ubershader's combiner stages: each source, operand and operation is chosen
+/// by a switch on the packed configuration.
+constexpr const char* UberMain = R"(
 vec4 Source(uint s, vec4 prev, vec4 buf, vec4 k, vec4 t0, vec4 t1, vec4 t2, vec4 ld, vec4 ls) {
     switch (s) {
     case 0u: return v_color;
@@ -170,22 +249,8 @@ void main() {
     vec4 t0 = texture(tex[0], v_uv0);
     vec4 t1 = texture(tex[1], v_uv1);
     vec4 t2 = texture(tex[2], v_uv2);
-
-    // Per-light diffuse plus specular from two lookup tables (D0 and RR).
-    vec3 n = normalize(v_normal);
-    vec3 view = normalize(v_view);
-    vec3 diffuse = vec3(0.1);
-    vec3 specular = vec3(0.0);
-    for (uint i = 0u; i < misc_cfg.y; ++i) {
-        vec3 l = normalize(light_dir[i].xyz);
-        float nl = max(dot(n, l), 0.0);
-        float d0 = texelFetch(lut, int(clamp(dot(n, normalize(l + view)), 0.0, 1.0) * 255.0)).r;
-        float rr = texelFetch(lut, 256 + int(clamp(dot(view, n), 0.0, 1.0) * 255.0)).r;
-        diffuse += light_diffuse[i].rgb * nl;
-        specular += light_specular[i].rgb * d0 * rr * nl;
-    }
-    vec4 ld = vec4(clamp(diffuse, 0.0, 1.0), 1.0);
-    vec4 ls = vec4(clamp(specular, 0.0, 1.0), 1.0);
+    vec4 ld, ls;
+    Lighting(ld, ls);
 
     // Texture combiner stages. The combiner buffer lags one stage, as on the 3DS.
     vec4 prev = v_color;
@@ -208,30 +273,54 @@ void main() {
         if (bitfieldExtract(c.z, 12, 1) != 0u) next_buf.rgb = prev.rgb;
         if (bitfieldExtract(c.z, 13, 1) != 0u) next_buf.a = prev.a;
     }
+    o_color = Finish(prev);
+}
+)";
 
-    if (misc_cfg.w != 0u) {
-        float f = texelFetch(lut, 512 + int(clamp(gl_FragCoord.z, 0.0, 1.0) * 255.0)).r;
-        prev.rgb = mix(vec3(0.5, 0.6, 0.7), prev.rgb, f);
+/// The compact ubershader's combiner stages: sources are read from a candidate list
+/// by index, operands are masks and every operation but dot3 is one weighted sum,
+/// so all configurations run the same short instruction sequence.
+constexpr const char* CompactMain = R"(
+void main() {
+    vec4 ld, ls;
+    Lighting(ld, ls);
+    // Candidate sources, in the order the compact configuration indexes them.
+    vec4 cand[9];
+    cand[0] = v_color;
+    cand[1] = ld;
+    cand[2] = ls;
+    cand[3] = texture(tex[0], v_uv0);
+    cand[4] = texture(tex[1], v_uv1);
+    cand[5] = texture(tex[2], v_uv2);
+    vec4 prev = v_color;
+    vec4 next_buf = vec4(0.0);
+    for (uint i = 0u; i < misc_cfg.x; ++i) {
+        cand[6] = next_buf; // The combiner buffer lags one stage, as on the 3DS.
+        cand[7] = stage_const[i];
+        cand[8] = prev;
+        vec3 x[3];
+        float y[3];
+        for (int j = 0; j < 3; ++j) {
+            vec4 s = cand[c_src[i][0][j]];
+            vec3 v = c_rgb_pass[i][j] * s.rgb + vec3(dot(s, c_rgb_sel[i][j]));
+            x[j] = mix(v, 1.0 - v, c_rgb_inv[i][j]);
+            float w = dot(cand[c_src[i][1][j]], c_a_sel[i][j]);
+            y[j] = mix(w, 1.0 - w, c_a_inv[i][j]);
+        }
+        vec4 k0 = c_rgb_k[i][0];
+        vec4 k1 = c_rgb_k[i][1];
+        vec3 rgb = k0.x * x[0] + k0.y * x[1] + k0.z * x[2] + k0.w * x[0] * x[1] +
+                   k1.x * x[0] * x[2] + k1.y * x[1] * x[2] + k1.z;
+        if (k1.w != 0.0) rgb = vec3(min(dot(x[0] - 0.5, x[1] - 0.5) * 4.0, 1.0));
+        vec4 q0 = c_a_k[i][0];
+        vec4 q1 = c_a_k[i][1];
+        float a = q0.x * y[0] + q0.y * y[1] + q0.z * y[2] + q0.w * y[0] * y[1] +
+                  q1.x * y[0] * y[2] + q1.y * y[1] * y[2] + q1.z;
+        vec4 sc = c_scale[i];
+        prev = vec4(clamp(rgb * sc.x, 0.0, 1.0), clamp(a * sc.y, 0.0, 1.0));
+        next_buf = vec4(mix(next_buf.rgb, prev.rgb, sc.z), mix(next_buf.a, prev.a, sc.w));
     }
-#ifndef SPECIALIZED
-    // Never true (fog enable is 0 or 1), but makes this run's binary unique so a
-    // driver's own shader cache cannot hide the cold compile.
-    if (misc_cfg.w == NONCE) prev.r = 1.0 - prev.r;
-#endif
-
-    bool pass;
-    switch (misc_cfg.z) {
-    case 0u: pass = false; break;
-    case 1u: pass = true; break;
-    case 2u: pass = prev.a == 0.1; break;
-    case 3u: pass = prev.a != 0.1; break;
-    case 4u: pass = prev.a < 0.1; break;
-    case 5u: pass = prev.a <= 0.1; break;
-    case 6u: pass = prev.a > 0.1; break;
-    default: pass = prev.a >= 0.1; break;
-    }
-    if (!pass) discard;
-    o_color = prev;
+    o_color = Finish(prev);
 }
 )";
 
@@ -293,6 +382,103 @@ std::string SpecializedConstants(const Config& c) {
                        list(std::array<std::array<u32, 4>, 1>{c.misc_cfg}, "uvec4", "u"),
                        list(c.light_dir, "vec4", ""), list(c.light_diffuse, "vec4", ""),
                        list(c.light_specular, "vec4", ""));
+}
+
+/// The compact ubershader's configuration, laid out exactly like its std140 block.
+struct CompactData {
+    std::array<std::array<std::array<u32, 4>, 2>, 6> src{};
+    std::array<std::array<std::array<float, 4>, 3>, 6> rgb_sel{};
+    std::array<std::array<float, 4>, 6> rgb_pass{}, rgb_inv{};
+    std::array<std::array<std::array<float, 4>, 3>, 6> a_sel{};
+    std::array<std::array<float, 4>, 6> a_inv{};
+    std::array<std::array<std::array<float, 4>, 2>, 6> rgb_k{}, a_k{};
+    std::array<std::array<float, 4>, 6> scale{}, stage_const{};
+    std::array<u32, 4> misc_cfg{};
+    std::array<std::array<float, 4>, 8> light_dir{}, light_diffuse{}, light_specular{};
+};
+
+/// Combine coefficients (k0 a + k1 b + k2 c + k3 ab + k4 ac + k5 bc + k6, then a dot3
+/// flag) for one PICA combine operation, matching UberMain's CombineRgb/CombineA.
+std::array<std::array<float, 4>, 2> Coefficients(u32 op, bool color) {
+    switch (op) {
+    case 0:
+        return {{{1, 0, 0, 0}, {0, 0, 0, 0}}}; // a
+    case 1:
+        return {{{0, 0, 0, 1}, {0, 0, 0, 0}}}; // a * b
+    case 2:
+        return {{{1, 1, 0, 0}, {0, 0, 0, 0}}}; // a + b
+    case 3:
+        return {{{1, 1, 0, 0}, {0, 0, -0.5f, 0}}}; // a + b - 0.5
+    case 4:
+        return {{{0, 1, 0, 0}, {1, -1, 0, 0}}}; // mix(b, a, c) = b + ac - bc
+    case 5:
+        return {{{1, -1, 0, 0}, {0, 0, 0, 0}}}; // a - b
+    case 6:
+    case 7:
+        if (color)
+            return {{{0, 0, 0, 0}, {0, 0, 0, 1}}}; // dot3
+        [[fallthrough]];
+    default:
+        return {{{0, 0, 0, 0}, {1, 1, 0, 0}}}; // (a + b) * c
+    case 8:
+        return {{{0, 0, 1, 1}, {0, 0, 0, 0}}}; // a * b + c
+    }
+}
+
+/// Decodes the ubershader's packed configuration into the compact shader's indices,
+/// masks and coefficients, so both shaders draw the same material.
+CompactData ToCompact(const Config& c) {
+    CompactData k{};
+    // Candidate list order in CompactMain: sources 0-5 as is, then buffer, constant, previous.
+    const auto candidate = [](u32 code) {
+        return code <= 5 ? code : code == 13 ? 6U : code == 14 ? 7U : 8U;
+    };
+    for (std::size_t i = 0; i < 6; ++i) {
+        const auto& [x, y, z, w] = c.stage_cfg[i];
+        for (u32 j = 0; j < 3; ++j) {
+            k.src[i][0][j] = candidate(x >> (4 * j) & 15);
+            k.src[i][1][j] = candidate(x >> (12 + 4 * j) & 15);
+            // Color operands: rgb, aaa, rrr, ggg or bbb, each optionally inverted.
+            const u32 op = y >> (4 * j) & 15;
+            const int channel = op <= 1 ? -1 : op <= 3 ? 3 : op <= 5 ? 0 : op <= 9 ? 1 : 2;
+            k.rgb_pass[i][j] = channel < 0 ? 1.0f : 0.0f;
+            if (channel >= 0)
+                k.rgb_sel[i][j][channel] = 1.0f;
+            const bool known = op <= 5 || op == 8 || op == 9 || op == 12;
+            k.rgb_inv[i][j] = known ? static_cast<float>(op & 1) : 1.0f;
+            // Alpha operands: a, r, g or b, each optionally inverted.
+            const u32 alpha_op = y >> (12 + 3 * j) & 7;
+            k.a_sel[i][j][alpha_op < 2 ? 3 : (alpha_op >> 1) - 1] = 1.0f;
+            k.a_inv[i][j] = static_cast<float>(alpha_op & 1);
+        }
+        k.rgb_k[i] = Coefficients(z & 15, true);
+        k.a_k[i] = Coefficients(z >> 4 & 15, false);
+        k.scale[i] = {static_cast<float>(1U << (z >> 8 & 3)),
+                      static_cast<float>(1U << (z >> 10 & 3)), static_cast<float>(z >> 12 & 1),
+                      static_cast<float>(z >> 13 & 1)};
+        (void)w;
+    }
+    k.stage_const = c.stage_const;
+    k.misc_cfg = c.misc_cfg;
+    k.light_dir = c.light_dir;
+    k.light_diffuse = c.light_diffuse;
+    k.light_specular = c.light_specular;
+    return k;
+}
+
+/// The probe's three fragment shaders.
+enum class Shader { Uber, Compact, Specialized };
+
+/// Assembles one probe fragment shader's GLSL. The nonce makes its binary unique.
+std::string FragmentSource(Shader shader, u32 nonce) {
+    std::string out = fmt::format("#version 450\n#define NONCE {}u\n", nonce);
+    if (shader == Shader::Specialized)
+        out += SpecializedConstants(TestConfig());
+    out += FragmentInterface;
+    out += shader == Shader::Compact ? CompactConfig : UberConfig;
+    out += FragmentCommon;
+    out += shader == Shader::Compact ? CompactMain : UberMain;
+    return out;
 }
 
 /// The probe's Vulkan objects. Destroyers run in reverse creation order, then the
@@ -581,10 +767,11 @@ void Discard(const Context& c, const std::vector<Build>& builds) {
 
 /// Builds the first `count` blend variants on `threads` threads, as a "Preparing
 /// graphics" screen would with all cores, and returns the builds and wall time.
+/// Pipeline i uses fragment module fs[i % fs.size()].
 std::pair<std::vector<Build>, double> BuildAll(const Context& c, vk::ShaderModule vs,
-                                               vk::ShaderModule fs, vk::PipelineLayout layout,
-                                               vk::PipelineCache cache, u32 count, u32 threads,
-                                               bool fail_on_compile) {
+                                               std::span<const vk::ShaderModule> fs,
+                                               vk::PipelineLayout layout, vk::PipelineCache cache,
+                                               u32 count, u32 threads, bool fail_on_compile) {
     std::vector<Build> builds(count);
     std::atomic<u32> next{0};
     std::atomic<bool> failed{false};
@@ -594,8 +781,8 @@ std::pair<std::vector<Build>, double> BuildAll(const Context& c, vk::ShaderModul
         pool.emplace_back([&] {
             for (u32 i; (i = next++) < count;) {
                 try {
-                    builds[i] = CreatePipeline(c, vs, fs, layout, cache, MakeVariant(c, i),
-                                               fail_on_compile);
+                    builds[i] = CreatePipeline(c, vs, fs[i % fs.size()], layout, cache,
+                                               MakeVariant(c, i), fail_on_compile);
                 } catch (...) {
                     failed = true;
                 }
@@ -834,42 +1021,82 @@ void CreateDevice(Context& c, std::string& out) {
     c.queue = c.device.getQueue(c.queue_family, 0, c.d);
 }
 
-/// A fragment ubershader source whose binary is unique to this call.
-std::string UniqueUbershader(std::mt19937& random) {
-    return fmt::format("#version 450\n#define NONCE {}u\n", 2 + random() % 0x7fffffff) +
-           FragmentShader;
+/// A random nonce for FragmentSource, so each build's binary is new to the driver.
+u32 Nonce(std::mt19937& random) {
+    return 2 + random() % 0x7fffffff;
 }
 
-/// Method B timings: a cold ubershader pipeline, blend-only variants after it, a whole
-/// cold variant set on all cores, and whether the saved cache makes it compile-free.
+/// Method B timings: cold compiles of each shader kind, new blend variants of a
+/// compiled shader, a whole cold variant set and a set of distinct shaders on all
+/// cores, and whether the saved cache makes the next launch compile-free.
 std::string ProbePipelines(Context& c, vk::PipelineLayout layout, u32 variants) {
     std::string out = "-- pipeline builds: ubershader with blend variants --\n";
     std::mt19937 random{std::random_device{}()};
     const auto vs = Module(c, VertexShader, vk::ShaderStageFlagBits::eVertex);
+    const auto fragment = [&](Shader shader, double* glslang_ms = nullptr) {
+        return Module(c, FragmentSource(shader, Nonce(random)), vk::ShaderStageFlagBits::eFragment,
+                      glslang_ms);
+    };
     double glslang_ms = 0.0;
-    const auto fs =
-        Module(c, UniqueUbershader(random), vk::ShaderStageFlagBits::eFragment, &glslang_ms);
+    const auto fs = fragment(Shader::Uber, &glslang_ms);
     out += fmt::format("ubershader GLSL to SPIR-V on the CPU: {:.1f} ms\n", glslang_ms);
 
-    // One thread: the first build compiles the shaders; the rest differ only in blending.
+    // One cold pipeline per shader kind, each with a fresh cache: what one compile costs.
+    const auto cold_compile = [&](vk::ShaderModule module) {
+        const auto cache = c.Own(c.device.createPipelineCache({}, nullptr, c.d));
+        const Build build = CreatePipeline(c, vs, module, layout, cache, MakeVariant(c, 0));
+        Discard(c, {build});
+        return build.ms;
+    };
+    const double compact_ms = cold_compile(fragment(Shader::Compact));
+    const double special_ms = cold_compile(fragment(Shader::Specialized));
+
+    // One thread: the first build compiles the ubershader; every later variant differs
+    // only in blending and must be served from the cache without compiling.
     const auto cache = c.Own(c.device.createPipelineCache({}, nullptr, c.d));
     const Build first = CreatePipeline(c, vs, fs, layout, cache, MakeVariant(c, 0));
     Discard(c, {first});
-    out += fmt::format("first pipeline, cold compile: {:.1f} ms\n", first.ms);
-    const auto [after, after_wall] = BuildAll(c, vs, fs, layout, cache, variants, 1, false);
+    out += fmt::format("cold compile, one pipeline: ubershader {:.1f} ms, compact {:.1f} ms, "
+                       "specialized {:.1f} ms\n",
+                       first.ms, compact_ms, special_ms);
+    const auto [after, after_wall] =
+        BuildAll(c, vs, {&fs, 1}, layout, cache, variants, 1, c.cache_control);
     Discard(c, after);
-    out += Summary("blend variants after it, 1 thread", after, after_wall);
+    out += Summary(c.cache_control ? "new blend variants after it, compiles refused"
+                                   : "new blend variants after it",
+                   after, after_wall);
 
-    // A new shader and an empty cache, every variant built across all cores: the
-    // cost of a one-time "Preparing graphics" screen for this set.
-    const std::string source = UniqueUbershader(random);
+    // A new shader and an empty cache, every variant built across all cores.
+    const u32 threads = std::max(1U, std::thread::hardware_concurrency());
+    const std::string source = FragmentSource(Shader::Uber, Nonce(random));
     const auto cold_fs = Module(c, source, vk::ShaderStageFlagBits::eFragment);
     const auto cold_cache = c.Own(c.device.createPipelineCache({}, nullptr, c.d));
-    const u32 threads = std::max(1U, std::thread::hardware_concurrency());
     const auto [cold, cold_wall] =
-        BuildAll(c, vs, cold_fs, layout, cold_cache, variants, threads, false);
+        BuildAll(c, vs, {&cold_fs, 1}, layout, cold_cache, variants, threads, false);
     Discard(c, cold);
     out += Summary(fmt::format("cold set on {} threads", threads), cold, cold_wall);
+
+    // Distinct shaders built across all cores: how many a "Preparing graphics" screen
+    // can compile per second.
+    std::vector<vk::ShaderModule> distinct;
+    for (u32 i = 0; i < (variants >= 64 ? 32U : 4U); ++i)
+        distinct.push_back(fragment(Shader::Specialized));
+    const auto distinct_cache = c.Own(c.device.createPipelineCache({}, nullptr, c.d));
+    const auto [shaders, shaders_wall] = BuildAll(
+        c, vs, distinct, layout, distinct_cache, static_cast<u32>(distinct.size()), threads, false);
+    Discard(c, shaders);
+    out += Summary(fmt::format("distinct specialized shaders on {} threads", threads), shaders,
+                   shaders_wall);
+    out += fmt::format("shader compile throughput: {:.0f} per second\n",
+                       1000.0 * static_cast<double>(distinct.size()) / shaders_wall);
+
+    // Method A: one pipeline whose blending is set per draw.
+    if (c.dynamic_blend) {
+        const Build dynamic =
+            CreatePipeline(c, vs, cold_fs, layout, cold_cache, MakeVariant(c, 0), false, true);
+        Discard(c, {dynamic});
+        out += fmt::format("dynamic-blend pipeline (method A): {:.1f} ms\n", dynamic.ms);
+    }
 
     // The next launch: a new module from the same source and a cache created from the
     // saved data. Every build should be served without compiling. The empty-cache run
@@ -884,22 +1111,15 @@ std::string ProbePipelines(Context& c, vk::PipelineLayout layout, u32 variants) 
     const auto warm_fs = Module(c, source, vk::ShaderStageFlagBits::eFragment);
     const auto warm_cache = c.Own(c.device.createPipelineCache(
         {.initialDataSize = data.size(), .pInitialData = data.data()}, nullptr, c.d));
-    const auto [warm, warm_wall] = BuildAll(c, vs, warm_fs, layout, warm_cache, variants, 1, true);
+    const auto [warm, warm_wall] =
+        BuildAll(c, vs, {&warm_fs, 1}, layout, warm_cache, variants, 1, true);
     Discard(c, warm);
     out += Summary("next launch, saved cache, compiles refused", warm, warm_wall);
     const auto empty_cache = c.Own(c.device.createPipelineCache({}, nullptr, c.d));
     const auto [empty, empty_wall] =
-        BuildAll(c, vs, warm_fs, layout, empty_cache, variants, 1, true);
+        BuildAll(c, vs, {&warm_fs, 1}, layout, empty_cache, variants, 1, true);
     Discard(c, empty);
     out += Summary("same, empty cache (driver's own cache only)", empty, empty_wall);
-
-    // Method A: one pipeline whose blending is set per draw.
-    if (c.dynamic_blend) {
-        const Build dynamic =
-            CreatePipeline(c, vs, cold_fs, layout, cold_cache, MakeVariant(c, 0), false, true);
-        Discard(c, {dynamic});
-        out += fmt::format("dynamic-blend pipeline (method A): {:.1f} ms\n", dynamic.ms);
-    }
     return out;
 }
 
@@ -910,7 +1130,8 @@ std::string ProbeLibraries(Context& c, vk::PipelineLayout layout, u32 variants) 
     std::string out = "-- pipeline libraries: shared shader parts, per-variant link --\n";
     std::mt19937 random{std::random_device{}()};
     const auto vs = Module(c, VertexShader, vk::ShaderStageFlagBits::eVertex);
-    const auto fs = Module(c, UniqueUbershader(random), vk::ShaderStageFlagBits::eFragment);
+    const auto fs =
+        Module(c, FragmentSource(Shader::Uber, Nonce(random)), vk::ShaderStageFlagBits::eFragment);
     const FixedState fixed;
     const vk::PipelineRenderingCreateInfo rendering{.colorAttachmentCount = 1,
                                                     .pColorAttachmentFormats = &ColorFormat};
@@ -995,25 +1216,31 @@ std::string ProbeLibraries(Context& c, vk::PipelineLayout layout, u32 variants) 
     return out;
 }
 
-/// Method B's per-pixel price: the same material drawn by the ubershader and by
-/// the specialized shader, full-screen at 2x with overdraw, timed on the GPU. One
-/// layer of each is read back to prove both shaders compute the same image.
+/// What each fragment shader costs per pixel: the same material drawn by the
+/// ubershader, the compact ubershader and the specialized shader, full-screen at 2x
+/// with overdraw, timed on the GPU. One layer of each is read back to prove all three
+/// compute the same image, so the timings compare like with like.
 std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
                             vk::PipelineLayout layout, u32 layers, u32 runs) {
-    std::string out = "-- per-pixel cost: ubershader against specialized shader --\n";
+    std::string out = "-- per-pixel cost: ubershaders against the specialized shader --\n";
     const Config config = TestConfig();
-    const std::string header = "#version 450\n#define NONCE 2u\n";
+    const CompactData compact = ToCompact(config);
+    constexpr std::array names{"ubershader", "compact ubershader", "specialized"};
+    constexpr std::array shaders{Shader::Uber, Shader::Compact, Shader::Specialized};
+    constexpr u32 count = static_cast<u32>(shaders.size());
     const auto vs = Module(c, VertexShader, vk::ShaderStageFlagBits::eVertex);
-    const auto uber = Module(c, header + FragmentShader, vk::ShaderStageFlagBits::eFragment);
-    const auto special = Module(c, header + SpecializedConstants(config) + FragmentShader,
-                                vk::ShaderStageFlagBits::eFragment);
-    const std::array pipelines{
-        c.Own(CreatePipeline(c, vs, uber, layout, {}, AlphaBlend()).pipeline),
-        c.Own(CreatePipeline(c, vs, special, layout, {}, AlphaBlend()).pipeline)};
+    std::array<vk::Pipeline, count> pipelines;
+    for (u32 k = 0; k < count; ++k) {
+        const auto fs =
+            Module(c, FragmentSource(shaders[k], 2), vk::ShaderStageFlagBits::eFragment);
+        pipelines[k] = c.Own(CreatePipeline(c, vs, fs, layout, {}, AlphaBlend()).pipeline);
+    }
 
-    // Inputs both shaders read: the configuration, the lookup tables and a texture.
+    // Inputs the shaders read: both configurations, the lookup tables and a texture.
     const auto ubo =
         HostBuffer(c, vk::BufferUsageFlagBits::eUniformBuffer, sizeof(config), &config);
+    const auto compact_ubo =
+        HostBuffer(c, vk::BufferUsageFlagBits::eUniformBuffer, sizeof(compact), &compact);
     std::array<float, 768> lut;
     for (u32 i = 0; i < 256; ++i) {
         lut[i] = 0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.05f);
@@ -1048,13 +1275,13 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
                                       .addressModeV = vk::SamplerAddressMode::eRepeat,
                                       .addressModeW = vk::SamplerAddressMode::eRepeat},
                                      nullptr, c.d));
-    std::array<void*, 2> readback_data{};
-    const std::array readback{HostBuffer(c, vk::BufferUsageFlagBits::eTransferDst,
-                                         Width * Height * 4, nullptr, &readback_data[0]),
-                              HostBuffer(c, vk::BufferUsageFlagBits::eTransferDst,
-                                         Width * Height * 4, nullptr, &readback_data[1])};
+    std::array<void*, count> readback_data{};
+    std::array<vk::Buffer, count> readback;
+    for (u32 k = 0; k < count; ++k)
+        readback[k] = HostBuffer(c, vk::BufferUsageFlagBits::eTransferDst, Width * Height * 4,
+                                 nullptr, &readback_data[k]);
 
-    const std::array sizes{vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, 1},
+    const std::array sizes{vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, 2},
                            vk::DescriptorPoolSize{vk::DescriptorType::eCombinedImageSampler, 3},
                            vk::DescriptorPoolSize{vk::DescriptorType::eUniformTexelBuffer, 1}};
     const auto pool = c.Own(c.device.createDescriptorPool(
@@ -1065,6 +1292,7 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
         .descriptorPool = pool, .descriptorSetCount = 1, .pSetLayouts = &set_layout};
     Check(c.device.allocateDescriptorSets(&set_info, &set, c.d), "descriptor set");
     const vk::DescriptorBufferInfo ubo_info{ubo, 0, VK_WHOLE_SIZE};
+    const vk::DescriptorBufferInfo compact_info{compact_ubo, 0, VK_WHOLE_SIZE};
     const vk::DescriptorImageInfo image_info{sampler, texture_view,
                                              vk::ImageLayout::eShaderReadOnlyOptimal};
     const std::array image_infos{image_info, image_info, image_info};
@@ -1083,12 +1311,17 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
                                .dstBinding = 2,
                                .descriptorCount = 1,
                                .descriptorType = vk::DescriptorType::eUniformTexelBuffer,
-                               .pTexelBufferView = &lut_view}};
+                               .pTexelBufferView = &lut_view},
+        vk::WriteDescriptorSet{.dstSet = set,
+                               .dstBinding = 3,
+                               .descriptorCount = 1,
+                               .descriptorType = vk::DescriptorType::eUniformBuffer,
+                               .pBufferInfo = &compact_info}};
     c.device.updateDescriptorSets(writes, nullptr, c.d);
 
-    // One command buffer: upload the texture, alternate timed runs of both shaders,
+    // One command buffer: upload the texture, alternate timed runs of the shaders,
     // then render one layer of each for the readback comparison.
-    const u32 queries = runs * 4;
+    const u32 queries = runs * count * 2;
     const auto query_pool = c.Own(c.device.createQueryPool(
         {.queryType = vk::QueryType::eTimestamp, .queryCount = queries}, nullptr, c.d));
     const auto command_pool =
@@ -1131,8 +1364,8 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
         cmd.endRendering(c.d);
     };
     for (u32 run = 0; run < runs; ++run) {
-        for (u32 k = 0; k < 2; ++k) {
-            const u32 query = (run * 2 + k) * 2;
+        for (u32 k = 0; k < count; ++k) {
+            const u32 query = (run * count + k) * 2;
             cmd.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, query_pool, query, c.d);
             draw(pipelines[k], layers);
             cmd.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, query_pool, query + 1,
@@ -1142,7 +1375,7 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
                        vk::ImageLayout::eColorAttachmentOptimal);
         }
     }
-    for (u32 k = 0; k < 2; ++k) {
+    for (u32 k = 0; k < count; ++k) {
         draw(pipelines[k], 1);
         Transition(c, cmd, target, vk::ImageLayout::eColorAttachmentOptimal,
                    vk::ImageLayout::eTransferSrcOptimal);
@@ -1169,33 +1402,42 @@ std::string ProbeShaderCost(Context& c, vk::DescriptorSetLayout set_layout,
               vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait, c.d),
           "timestamps");
     const u64 mask = c.timestamp_bits >= 64 ? ~0ULL : (1ULL << c.timestamp_bits) - 1;
-    std::array<double, 2> best{1e30, 1e30}, first{};
+    std::array<double, count> best, first{};
+    best.fill(1e30);
     for (u32 run = 0; run < runs; ++run)
-        for (u32 k = 0; k < 2; ++k) {
-            const u32 query = (run * 2 + k) * 2;
+        for (u32 k = 0; k < count; ++k) {
+            const u32 query = (run * count + k) * 2;
             const double ms = static_cast<double>((stamps[query + 1] - stamps[query]) & mask) *
                               c.props.limits.timestampPeriod / 1e6;
             best[k] = std::min(best[k], ms);
             first[k] = run == 0 ? ms : first[k];
         }
-    int worst = 0;
-    const auto* a = static_cast<const u8*>(readback_data[0]);
-    const auto* b = static_cast<const u8*>(readback_data[1]);
-    for (u32 i = 0; i < Width * Height * 4; ++i)
-        worst = std::max(worst, std::abs(int{a[i]} - int{b[i]}));
+
+    // Largest per-channel difference of each image from the specialized shader's.
+    const auto difference = [&](u32 k) {
+        int worst = 0;
+        const auto* a = static_cast<const u8*>(readback_data[k]);
+        const auto* b = static_cast<const u8*>(readback_data[count - 1]);
+        for (u32 i = 0; i < Width * Height * 4; ++i)
+            worst = std::max(worst, std::abs(int{a[i]} - int{b[i]}));
+        return worst;
+    };
     const double pixels = static_cast<double>(Width) * Height * layers;
     out += fmt::format("{}x{} with {} layers, best of {} runs\n", Width, Height, layers, runs);
-    out += fmt::format("ubershader: {:.3f} ms ({:.2f} ns per pixel)\n", best[0],
-                       best[0] * 1e6 / pixels);
-    out += fmt::format("specialized: {:.3f} ms ({:.2f} ns per pixel)\n", best[1],
-                       best[1] * 1e6 / pixels);
-    out += fmt::format("ubershader / specialized: {:.2f}x\n", best[0] / best[1]);
-    // Time above the best in the first run is work the driver did at first draw,
-    // such as a deferred compile, which would be a pause in a game.
-    out +=
-        fmt::format("first run: ubershader {:.3f} ms, specialized {:.3f} ms\n", first[0], first[1]);
-    out += fmt::format("image difference: max {} per channel ({})\n", worst,
-                       worst <= 2 ? "same image" : "MISMATCH: timings not comparable");
+    for (u32 k = 0; k < count; ++k) {
+        // Time above the best in the first run is work the driver did at first draw,
+        // such as a deferred compile, which would be a pause in a game.
+        out += fmt::format("{}: {:.3f} ms ({:.2f} ns per pixel), {:.2f}x specialized, first run "
+                           "{:.3f} ms",
+                           names[k], best[k], best[k] * 1e6 / pixels, best[k] / best[count - 1],
+                           first[k]);
+        if (k + 1 < count) {
+            const int worst = difference(k);
+            out += fmt::format(", image difference {} ({})", worst,
+                               worst <= 2 ? "same image" : "MISMATCH: timings not comparable");
+        }
+        out += '\n';
+    }
     return out;
 }
 
@@ -1208,14 +1450,16 @@ std::string ReportVulkan(const Options& options) {
         CreateDevice(c, out);
         if (!c.device)
             return out;
-        // The resource layout every probe shader uses: configuration, three textures
-        // and the lookup tables.
+        // The resource layout every probe shader uses: the ubershader's configuration,
+        // three textures, the lookup tables and the compact ubershader's configuration.
         const std::array bindings{
             vk::DescriptorSetLayoutBinding{0, vk::DescriptorType::eUniformBuffer, 1,
                                            vk::ShaderStageFlagBits::eFragment},
             vk::DescriptorSetLayoutBinding{1, vk::DescriptorType::eCombinedImageSampler, 3,
                                            vk::ShaderStageFlagBits::eFragment},
             vk::DescriptorSetLayoutBinding{2, vk::DescriptorType::eUniformTexelBuffer, 1,
+                                           vk::ShaderStageFlagBits::eFragment},
+            vk::DescriptorSetLayoutBinding{3, vk::DescriptorType::eUniformBuffer, 1,
                                            vk::ShaderStageFlagBits::eFragment}};
         const auto set_layout = c.Own(c.device.createDescriptorSetLayout(
             {.bindingCount = static_cast<u32>(bindings.size()), .pBindings = bindings.data()},

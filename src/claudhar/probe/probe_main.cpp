@@ -4,7 +4,7 @@
 
 // claudhar-probe: prints the device probe report on Linux. "--quick" measures less,
 // for CI on a CPU Vulkan driver. "--check" exits with an error when the Vulkan part
-// failed or the ubershader and specialized shader drew different images, so CI
+// failed or the probe's shaders drew different images, so CI
 // catches a broken probe before it reaches a phone.
 
 #include <cstdio>
@@ -22,6 +22,6 @@ int main(int argc, char** argv) {
     std::fputs((Claudhar::Probe::ReportCpu(options) + vulkan).c_str(), stdout);
     const bool failed = vulkan.find("error:") != std::string::npos ||
                         vulkan.find("MISMATCH") != std::string::npos ||
-                        vulkan.find("ubershader /") == std::string::npos;
+                        vulkan.find("\nspecialized: ") == std::string::npos;
     return check && failed ? 1 : 0;
 }
