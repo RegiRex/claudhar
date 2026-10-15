@@ -1,6 +1,6 @@
 # Copyright 2026 Claudhar Project
-# Licensed under GPLv2 or any later version
-# Refer to the license.txt file included.
+# Licensed under GPLv3 or any later version
+# Refer to the LICENSE.txt file included.
 
 # Phase 0 device probe: a library used by the Android probe screen, plus a
 # command-line tool for Linux that CI runs on a CPU Vulkan driver (lavapipe).

@@ -118,8 +118,11 @@ system services, file systems, loader, cryptography, audio, Android app and the
 is preserved with its history, platform notes and community links. Claudhar is an
 independent project; Azahar's services and community do not support it.
 
-Claudhar is licensed under **GPL-2.0-or-later**, the same license as Azahar; see
-[license.txt](license.txt). New files carry a Claudhar copyright header. Files
-taken from Azahar keep their original headers, and those that Claudhar changes add
-a "Modified by the Claudhar Project" notice and mark each change `Claudhar:`. Bundled
-dependencies in `externals/` keep their own licenses.
+Claudhar is licensed under **GPL-3.0-or-later**, following Azahar, which is moving
+from GPLv2-or-later to GPLv3-or-later; see [LICENSE.txt](LICENSE.txt). Azahar 2126.2
+already contains files licensed GPLv3 or later, so Claudhar as a whole is distributed
+under GPLv3 or later. Most files taken from Azahar still say "GPLv2 or any later
+version", which allows distribution under GPLv3; their headers are kept as they are.
+New Claudhar files carry a Claudhar header with GPLv3 or later. Azahar files that
+Claudhar changes add a "Modified by the Claudhar Project" notice and mark each change
+`Claudhar:`. Bundled dependencies in `externals/` keep their own licenses.

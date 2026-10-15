@@ -1,6 +1,6 @@
 // Copyright 2026 Claudhar Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the LICENSE.txt file included.
 
 // Vulkan half of the device probe. It answers the questions the zero-compile
 // renderer design depends on, on the device's real driver:

@@ -41,13 +41,15 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
 - Format C++ with the repository's `.clang-format` and Kotlin with ktlint; no
   trailing whitespace.
 
-## Licensing (GPL-2.0-or-later, following Azahar)
+## Licensing (GPL-3.0-or-later, following Azahar)
 
+- Claudhar is distributed under GPLv3 or later (LICENSE.txt), as Azahar now is.
+  Inherited files that say "GPLv2 or any later version" keep that header.
 - A new file starts with:
   ```
   // Copyright <year> Claudhar Project
-  // Licensed under GPLv2 or any later version
-  // Refer to the license.txt file included.
+  // Licensed under GPLv3 or any later version
+  // Refer to the LICENSE.txt file included.
   ```
 - A modified Azahar file keeps its original header and adds, below it:
   `// Modified by the Claudhar Project in <year>; changes are marked "Claudhar:".`

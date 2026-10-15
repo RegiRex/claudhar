@@ -1,6 +1,6 @@
 // Copyright 2026 Claudhar Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the LICENSE.txt file included.
 
 // Phase 0 device probe. It measures what the rebuild's design choices depend on,
 // on the device itself: how many cores of which speed the process may use, which

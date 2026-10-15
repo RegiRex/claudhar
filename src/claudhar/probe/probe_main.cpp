@@ -1,6 +1,6 @@
 // Copyright 2026 Claudhar Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the LICENSE.txt file included.
 
 // claudhar-probe: prints the device probe report on Linux. "--quick" measures less,
 // for CI on a CPU Vulkan driver. "--check" exits with an error when the Vulkan part

@@ -1,6 +1,6 @@
 // Copyright 2026 Claudhar Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the LICENSE.txt file included.
 
 // JNI entry for Claudhar's Phase 0 device probe: NativeLibrary.runDeviceProbe() in
 // Kotlin. It returns the native report (CPU, then Vulkan); the Kotlin side adds the

@@ -1,6 +1,6 @@
 // Copyright 2026 Claudhar Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the LICENSE.txt file included.
 
 // CPU half of the device probe. Thread placement in the rebuild is decided from
 // these numbers: which cores exist, how fast each one really is for emulator-like

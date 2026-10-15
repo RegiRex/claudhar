@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # Copyright 2026 Claudhar Project
-# Licensed under GPLv2 or any later version
-# Refer to the license.txt file included.
+# Licensed under GPLv3 or any later version
+# Refer to the LICENSE.txt file included.
 """Checks Claudhar's copyleft notices on the C++ and Kotlin files changed since the
-Azahar import. A new file must start with the Claudhar GPL header. A modified Azahar
-file keeps its own header and must carry the Claudhar change notice near the top, as
-GPLv2 section 2(a) asks of modified files. Run from the repository root; exits 1 and
-lists the offending files."""
+Azahar import. A new file must start with the Claudhar GPLv3-or-later header. A
+modified Azahar file keeps its own header and must carry the Claudhar change notice
+near the top, as GPLv3 section 5(a) asks of modified files. Run from the repository
+root; exits 1 and lists the offending files."""
 import re
 import subprocess
 import sys
 
 IMPORT = "98c8eac"  # "Import Azahar 2126.2 as the Claudhar base".
 HEADER = re.compile(r"\A// Copyright \d{4}(-\d{4})? Claudhar Project\n"
-                    r"// Licensed under GPLv2 or any later version\n"
-                    r"// Refer to the license.txt file included.\n")
+                    r"// Licensed under GPLv3 or any later version\n"
+                    r"// Refer to the LICENSE.txt file included.\n")
 NOTICE = "Modified by the Claudhar Project"
 EXTENSIONS = (".cpp", ".h", ".kt", ".kts")
 

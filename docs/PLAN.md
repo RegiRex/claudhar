@@ -373,7 +373,8 @@ real game. Phase 3 is where multicore speed is measured.
 
 ## 12. References
 
-- **Azahar** (GPLv2 or later): source of the reused parts. The rebuild is GPLv2 or
+- **Azahar** (moving from GPLv2-or-later to GPLv3-or-later; 2126.2 already contains
+  GPLv3-or-later files): source of the reused parts. The rebuild is GPLv3 or
   later as a result.
 - **Citra MMJ:** the community considers it strong on mid-range and Mali devices.
   It uses OpenGL ES, where framebuffer fetch gives in-shader blending (method C in
