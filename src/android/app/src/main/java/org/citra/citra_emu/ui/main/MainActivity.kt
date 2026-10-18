@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 package org.citra.citra_emu.ui.main
 
@@ -59,6 +60,7 @@ import org.citra.citra_emu.utils.BuildUtil
 import org.citra.citra_emu.utils.CiaInstallWorker
 import org.citra.citra_emu.utils.CitraDirectoryHelper
 import org.citra.citra_emu.utils.CitraDirectoryUtils
+import org.citra.citra_emu.utils.CrashReport
 import org.citra.citra_emu.utils.DirectoryInitialization
 import org.citra.citra_emu.utils.FileBrowserHelper
 import org.citra.citra_emu.utils.InsetsHelper
@@ -208,6 +210,13 @@ class MainActivity :
 
     override fun onResume() {
         checkUserPermissions()
+        // Claudhar: offer the report of a crash in the previous session, once the user
+        // folder it is saved to is available.
+        if (PermissionsHandler.hasWriteAccess(this) &&
+            DirectoryInitialization.areCitraDirectoriesReady()
+        ) {
+            CrashReport.offer(this)
+        }
 
         ThemeUtil.setCorrectTheme(this)
         super.onResume()

@@ -112,6 +112,10 @@ android {
     buildTypes {
         // Signed by release key, allowing for upload to Play Store.
         release {
+            // Claudhar: keep the native symbol tables, published by CI as the
+            // native-debug-symbols artifact, to turn crash report addresses into
+            // function names.
+            ndk.debugSymbolLevel = "SYMBOL_TABLE"
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {

@@ -20,6 +20,9 @@
     <string name="install_game_content">Install CIA file</string>
     <string name="install_game_content_description">Install applications, updates or DLC</string>
     <string name="share_log">Share Log</string>
+    <!-- Claudhar: the report offered after a crash in the previous session. -->
+    <string name="crash_report">Claudhar crashed last time</string>
+    <string name="crash_report_description">A crash report was saved as log/claudhar_crash.txt in the user folder. Please share it so the crash can be fixed.</string>
     <!-- Claudhar: the Phase 0 device probe on the home settings screen. -->
     <string name="device_probe">Device probe</string>
     <string name="device_probe_description">Measure this device\'s CPU, GPU, screens and controllers for Claudhar development</string>

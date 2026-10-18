@@ -58,7 +58,7 @@ object DeviceProbe {
         val context = activity.applicationContext
         Thread {
             val report = run(context)
-            val saved = save(context, report)
+            val saved = save(context, FILE_NAME, report)
             activity.runOnUiThread {
                 progress.dismiss()
                 if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
@@ -66,7 +66,7 @@ object DeviceProbe {
                     .setTitle(R.string.device_probe)
                     .setMessage(report)
                     .setPositiveButton(R.string.device_probe_share) { _, _ ->
-                        share(activity, saved, report)
+                        share(activity, saved, report, R.string.device_probe)
                     }
                     .setNeutralButton(R.string.device_probe_copy) { _, _ ->
                         copy(activity, report)
@@ -151,33 +151,34 @@ object DeviceProbe {
         }
     }
 
-    /** Writes the report to log/claudhar_probe.txt in the user folder; null if it can't. */
-    private fun save(context: Context, report: String): Uri? = try {
+    /**
+     * Writes a text report to log/[name] in the user folder, replacing an older one, and
+     * returns its URI, or null if it can't. Also used for crash reports (CrashReport).
+     */
+    internal fun save(context: Context, name: String, text: String): Uri? = try {
         val root = DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
         val log = root?.findFile("log") ?: root?.createDirectory("log")
-        log?.findFile(FILE_NAME)?.delete()
-        log?.createFile("text/plain", FILE_NAME)?.uri?.also { uri ->
-            context.contentResolver.openOutputStream(uri)?.use { it.write(report.toByteArray()) }
+        log?.findFile(name)?.delete()
+        log?.createFile("text/plain", name)?.uri?.also { uri ->
+            context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
         }
     } catch (e: Exception) {
-        Log.error("[DeviceProbe] Could not save the report: $e")
+        Log.error("[DeviceProbe] Could not save $name: $e")
         null
     }
 
-    /** Shares the saved file, or the text itself when it could not be saved. */
-    private fun share(activity: FragmentActivity, saved: Uri?, report: String) {
+    /** Shares a saved report, or the text itself when it could not be saved. */
+    internal fun share(activity: FragmentActivity, saved: Uri?, text: String, title: Int) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             if (saved != null) {
                 putExtra(Intent.EXTRA_STREAM, saved)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } else {
-                putExtra(Intent.EXTRA_TEXT, report)
+                putExtra(Intent.EXTRA_TEXT, text)
             }
         }
-        activity.startActivity(
-            Intent.createChooser(intent, activity.getText(R.string.device_probe))
-        )
+        activity.startActivity(Intent.createChooser(intent, activity.getText(title)))
     }
 
     /** Copies the report to the clipboard. */
