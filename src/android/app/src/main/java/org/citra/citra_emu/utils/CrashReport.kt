@@ -21,8 +21,8 @@ import org.citra.citra_emu.R
  * Android keeps a record of it; for a native crash that record (a tombstone) holds the
  * signal, the crashing thread's backtrace and recent log lines. On the next launch this
  * reads the record, decodes it to text, saves it as log/claudhar_crash.txt in the user
- * folder and offers to share it, once per crash. Backtrace addresses are turned into
- * function names afterwards with the build's native-debug-symbols artifact.
+ * folder and offers to share it, once per crash. The emulator library keeps its symbol
+ * table, so the backtrace names the crashing functions.
  */
 object CrashReport {
     private const val FILE_NAME = "claudhar_crash.txt"

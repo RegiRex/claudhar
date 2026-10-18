@@ -202,16 +202,6 @@ jobs:
             echo "Use it only when the native-tests and android jobs of this run are both green."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Native symbol tables for this exact build. A crash report's backtrace holds
-      # addresses and build IDs; these turn them into function names.
-      - name: Upload native debug symbols
-        uses: actions/upload-artifact@v7
-        with:
-          name: claudhar-native-debug-symbols
-          path: src/android/app/build/outputs/native-debug-symbols/vanillaRelease/native-debug-symbols.zip
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v7

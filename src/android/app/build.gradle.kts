@@ -50,6 +50,10 @@ android {
     packaging {
         // This is necessary for libadrenotools custom driver loading
         jniLibs.useLegacyPackaging = true
+        // Claudhar: keep the emulator library's symbol table (its debug information is
+        // already removed at link time), so Android's crash records name the crashing
+        // functions. It adds a few MiB to the APK.
+        jniLibs.keepDebugSymbols += "**/libcitra-android.so"
     }
 
     buildFeatures {
@@ -112,10 +116,6 @@ android {
     buildTypes {
         // Signed by release key, allowing for upload to Play Store.
         release {
-            // Claudhar: keep the native symbol tables, published by CI as the
-            // native-debug-symbols artifact, to turn crash report addresses into
-            // function names.
-            ndk.debugSymbolLevel = "SYMBOL_TABLE"
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {

@@ -55,4 +55,8 @@ if (ENABLE_VULKAN)
     endif()
 endif()
 
+# Claudhar: drop the debug information when linking but keep the symbol table, which
+# the APK now keeps (build.gradle.kts), so crash records name the crashing functions.
+target_link_options(citra-android PRIVATE -Wl,--strip-debug)
+
 set(CPACK_PACKAGE_EXECUTABLES ${CPACK_PACKAGE_EXECUTABLES} citra-android)
