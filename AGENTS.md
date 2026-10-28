@@ -31,7 +31,8 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
   version. The run builds and tests the branch's newest commit and, when both jobs are
   green, publishes a GitHub prerelease with the APK and creates the tag on that commit.
   Pushing a version tag does the same; never push `--tags`, because the clone holds
-  Azahar's own tags. Publish an alpha when a build is worth testing on a device; beta
+  Azahar's own tags. Link files in release notes at the version tag, not `main`, which
+  may not have them yet. Publish an alpha when a build is worth testing on a device; beta
   status needs device evidence, not a count of builds.
 
 ## Code
