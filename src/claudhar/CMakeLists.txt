@@ -5,3 +5,4 @@
 # Claudhar's own modules: new code written for the rebuild, as opposed to the
 # Azahar code it reuses. One subdirectory per module.
 add_subdirectory(probe)
+add_subdirectory(shading)
