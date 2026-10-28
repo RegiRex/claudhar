@@ -3,14 +3,16 @@
 # Refer to the LICENSE.txt file included.
 #
 # Claudhar CI: builds the ARM64 Android test APK as a direct download and runs the
-# C++ tests on Linux, for every push to main or a claude/ working branch.
-# It never publishes a release.
+# C++ tests on Linux, for every push to main or a claude/ working branch. Pushing a
+# version tag (for example 0.0.1-alpha) also publishes that build as a GitHub
+# prerelease with the APK attached, once both jobs are green.
 name: Claudhar
 
 on:
   workflow_dispatch:
   push:
     branches: ['main', 'claude/**']
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
   pull_request:
     branches: ['main']
 
@@ -150,6 +152,10 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64" NDK_CCACHE="$(command -v ccache)"
           export ANDROID_KEYSTORE_FILE="$KEYSTORE" ANDROID_KEYSTORE_PASS="$KEY_PASS"
           export ANDROID_KEY_ALIAS="$KEY_ALIAS"
+          # A tag build takes its version name from the tag; others use git describe.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            export GIT_TAG_NAME="$GITHUB_REF_NAME"
+          fi
           bash ./gradlew --no-daemon assembleVanillaRelease 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
       # Check the package identity and signature, and name the APK after the run.
@@ -160,11 +166,18 @@ jobs:
           TOOLS="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           mkdir -p artifacts
           SHA="$(git rev-parse --short=9 HEAD)"
-          APK="artifacts/claudhar-${{ github.run_number }}-$SHA-arm64.apk"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            APK="artifacts/claudhar-$GITHUB_REF_NAME-arm64.apk"
+          else
+            APK="artifacts/claudhar-${{ github.run_number }}-$SHA-arm64.apk"
+          fi
           cp "$(find src/android/app/build/outputs/apk/vanilla/release -name '*.apk' -print -quit)" "$APK"
           "$TOOLS/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='io.github.regirex.claudhar'" artifacts/package.txt
           grep -F "application-label:'Claudhar'" artifacts/package.txt
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            grep -F "versionName='$GITHUB_REF_NAME-vanilla'" artifacts/package.txt
+          fi
           "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           (cd artifacts && sha256sum "$(basename "$APK")" > apk-sha256.txt)
           git rev-parse HEAD > artifacts/source-commit.txt
@@ -180,6 +193,16 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 30
+
+      # A tag build's APK, zipped under a fixed name, for the release job to attach.
+      - name: Upload release APK
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: claudhar-release-apk
+          path: ${{ steps.package.outputs.apk }}
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload APK details
         uses: actions/upload-artifact@v7
@@ -223,3 +246,36 @@ jobs:
             ~/.gradle/wrapper
             ~/.cache/ccache
           key: claudhar-android-v1-${{ github.run_id }}
+
+  # Publishes a version tag's build as a prerelease once the tests and the APK are green.
+  # The release notes are docs/releases/<tag>.md, committed before the tag is pushed.
+  release:
+    if: github.ref_type == 'tag'
+    needs: [native-tests, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: docs/releases
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/releases/$TAG.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "::error::No release notes at $NOTES"
+            exit 1
+          fi
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name claudhar-release-apk --dir dist
+          gh release create "$TAG" dist/*.apk --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --prerelease --title "Claudhar $TAG" --notes-file "$NOTES"
+          echo "### Published [Claudhar $TAG]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
+            >> "$GITHUB_STEP_SUMMARY"

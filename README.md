@@ -3,7 +3,7 @@
 **A ground-up rebuild of the Azahar 3DS emulator for Android, designed around
 multi-core CPUs, with zero draw skipping and zero shader compilation pauses.**
 
-[Download a test build](https://github.com/RegiRex/claudhar/actions/workflows/claudhar.yml) ·
+[Download an alpha](https://github.com/RegiRex/claudhar/releases) ·
 [Report an issue](https://github.com/RegiRex/claudhar/issues) ·
 [Rebuild plan](docs/PLAN.md)
 
@@ -47,21 +47,21 @@ Hybrid and Combo correspond to Uberhar's Native and Combo modes. Any mode can be
 switched to **Accurate** timing per game, which processes GPU commands in step
 with the game exactly as Azahar does.
 
-## Installing a test build
+## Installing an alpha
 
-1. Open the [Claudhar workflow runs](https://github.com/RegiRex/claudhar/actions/workflows/claudhar.yml)
-   and pick the newest green run (both `native-tests` and `android` green).
-2. Use the **Download the Claudhar APK** link at the top of the run page. It
-   downloads the `.apk` itself; there is nothing to unzip. Downloads need a GitHub
-   sign-in and expire after 30 days.
-3. Install it on a **64-bit ARM Android device running Android 10 or newer**.
+1. Open [Releases](https://github.com/RegiRex/claudhar/releases) and download the
+   `.apk` attached to the newest alpha. No GitHub sign-in is needed.
+2. Install it on a **64-bit ARM Android device running Android 10 or newer**.
    Claudhar is a separate app (`io.github.regirex.claudhar`), so it installs next
    to Azahar and Uberhar without replacing either.
-4. On first launch choose a new, empty data folder such as `Claudhar`. Copy keys,
+3. On first launch choose a new, empty data folder such as `Claudhar`. Copy keys,
    saves or system files into it if you want them.
 
-If a run warns about a new signing key, uninstall the previous Claudhar build
-before installing the new one.
+An installed alpha offers the next alpha when one is published. Versions are
+`full.beta.alpha`: `0.0.1-alpha` is the first alpha before any beta. Every push also
+builds an APK on the [workflow runs](https://github.com/RegiRex/claudhar/actions/workflows/claudhar.yml)
+page (sign-in needed, kept 30 days), for testing between alphas. If a run warns about a
+new signing key, uninstall the previous Claudhar build before installing the new one.
 
 ## Checking the no-pause rules
 
