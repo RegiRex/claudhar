@@ -8,9 +8,10 @@ multi-core CPUs, with zero draw skipping and zero shader compilation pauses.**
 [Rebuild plan](docs/PLAN.md)
 
 > [!WARNING]
-> Claudhar is in **Phase 0**: today it is Azahar 2126.2 with a new name, its own
-> app ID and a device probe. The multi-core core and the new renderer arrive in
-> later phases. Do not expect it to run games better than Azahar yet.
+> Claudhar is starting **Phase 1**: today it is Azahar 2126.2 with a new name, its
+> own app ID, a device probe and a crash reporter. Zero-pause shading comes next; the
+> multi-core core and the new renderer follow. Do not expect it to run games better
+> than Azahar yet.
 
 ## Goals
 

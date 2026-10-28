@@ -46,35 +46,57 @@ keeps no cache of its own that would.
 same material as a specialized shader: 9.25 times as much. The first run matched the
 best run, so the driver does no compiling at first draw. Both images matched.
 
+## AYN Thor (probe v2, 2026-10-28)
+
+Report: [2026-10-28_thor_probe_v2.txt](device_reports/2026-10-28_thor_probe_v2.txt)
+
+| Measurement | Result |
+| --- | --- |
+| Cold compile, one pipeline | ubershader 46 ms, compact ubershader 33 ms, specialized 21 ms |
+| New blend variants of a compiled shader, compiles refused | all 64 built, none needed a compile, 0.19–0.38 ms each |
+| Distinct specialized shaders on all 8 cores | 162 per second (median 43 ms each while 8 compile at once) |
+| Next launch from the saved cache, compiles refused | all 64 built, 12 ms in total |
+
+| Per-pixel cost, 800×480, 16 layers | ns per pixel | against specialized |
+| --- | ---: | ---: |
+| Switch-based ubershader | 1.26 | 6.8× |
+| Compact ubershader (indexed sources, weighted-sum combiners) | 2.48 | 13.3× |
+| Specialized shader | 0.19 | 1.0× |
+
+No shader did work at its first draw, and all three images matched. The two runs of
+the switch-based ubershader (2.15 and 1.26 ns per pixel) show that single runs vary;
+the ratio to the specialized shader stays in the 7–9× range.
+
+## Crash found on the way
+
+Builds 4–9 crashed every game in `Vulkan::CreateSurface`
+([reports](device_reports/2026-10-27_thor_crash_fea.txt)). The probe had added a second
+definition of vulkan-hpp's inline dispatcher `init()`, compiled without the Android
+platform macro, and the linker kept it for the renderer too, so the renderer never
+loaded `vkCreateAndroidSurfaceKHR`. Fixed in build 10; CI now rejects any second
+definition (`tools/claudhar/check_vulkan_dispatch.py`).
+
 ## Decisions
 
-1. **Blending: method B, with on-demand variants that cannot compile.** Shader
-   programs come from a finite set built on the "Preparing graphics" screen. Pipelines
-   that differ only in blending or other fixed state are created when first needed,
-   with `VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT`, so the driver
-   either serves them from the cache in well under a millisecond or refuses. A refusal
-   is a bug, counted in `compile_waits`, never a wait. New variants are saved to the
-   cache for the next launch. Probe v2 tests "never compiles" directly.
-2. **Fragment shading: one switch-based ubershader is too slow per pixel.** At a
-   typical 2x frame (about 0.7 million pixels drawn about three times) it would take
-   roughly 4–5 ms of the Thor's GPU time: workable at 2x on the Thor, too slow for 4x
-   and marginal on the Duo. Probe v2 measures a compact, mostly branch-free ubershader.
-   Phase 2 then chooses between that ubershader, a precompiled family of partially
-   specialized shaders sized by the measured compile throughput, or both (family
-   members for common configurations, the ubershader as the always-ready fallback).
-   Combo mode keeps background specialization.
+1. **Blending: method B with on-demand variants that cannot compile.** Confirmed on the
+   Thor: once a shader is compiled, a pipeline that differs only in blending or other
+   fixed state is created in well under a millisecond, from the cache, with
+   `VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT`. Only shader programs
+   need preparing; blend variants are created when first needed and saved to the
+   pipeline cache. A refusal is a bug, counted in `compile_waits`, never a wait.
+2. **Fragment shading: an always-ready ubershader plus background specialization.**
+   The switch-based ubershader draws every configuration with no compile, at about
+   1.3–2.2 ns per pixel on the Thor: roughly 3–4 ms of GPU time for a 2x frame with
+   typical overdraw, which is workable at 2x and too slow for 4x on its own. Specialized
+   shaders, 7–9 times cheaper per pixel, are compiled on worker threads (162 per second
+   on all cores) and swapped in when ready, and the pipeline cache keeps them for the
+   next launch. Nothing ever waits for them. The compact formulation is rejected: it is
+   twice as slow as the switch-based one on the Adreno 740.
 3. **Threads.** The guest CPU runs on the X3. GPU command processing, the Vulkan
    recorder and job workers run on the four A715/A710 cores. Audio, presentation and
    I/O run on the A510s. Job-system work items are small and taken dynamically, so the
    slower cores end up with less work instead of an equal share.
-
-## Probe v2
-
-Adds, for the Thor and later the Duo:
-
-- the compact ubershader's per-pixel cost next to the other two, with an image check;
-- new blend variants built with compiles refused, which shows directly that they
-  never compile;
-- the cold compile time of each shader kind;
-- how many distinct shaders all cores compile per second, which sets how large a
-  precompiled shader family can be.
+4. **Phase order.** The ubershader and background specialization are what the premier
+   rule needs, and they work inside Azahar's existing Vulkan renderer. They move to
+   Phase 1, so cold first runs stop pausing before the core is rewritten; the new core
+   and renderer later reuse the same ubershader. See the plan's phase table.

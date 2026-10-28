@@ -1,6 +1,6 @@
 # Multicore 3DS Emulator Rebuild — Plan
 
-**Status:** approved 2026-10-14; Phase 0 in progress · **Repository:** RegiRex/claudhar
+**Status:** approved 2026-10-14; Phase 0 done on the Thor, Phase 1 in progress · **Repository:** RegiRex/claudhar
 **Builds on:** the multi-core architecture schematic and the Uberhar audits (shared with
 the owner outside this repository).
 
@@ -95,7 +95,7 @@ What the baseline device forces:
 | CPU renderer | ~3k | **Rewrite** as a tiled multicore renderer | The one renderer that uses every core. |
 | OpenGL renderer, Qt desktop app | ~40k | **Drop** | Vulkan only; Android first. |
 | Memory system | ~3k | **Rewrite** core (fast host mapping, page protection) | Lets threads share guest memory safely without per-access checks. |
-| Kernel (threads, sync, IPC) | 12k | **Reuse first**, made thread-safe in Phase 7 | Only matters once guest cores get their own threads. |
+| Kernel (threads, sync, IPC) | 12k | **Reuse first**, made thread-safe in Phase 8 | Only matters once guest cores get their own threads. |
 | System services (HLE) | 66k | **Reuse** | Behavior, not threading; years of compatibility fixes. |
 | File systems, loader, crypto | 15k + | **Reuse** | Same. |
 | ARM translator (Dynarmic) | external | **Reuse** | Best available; the Duo cannot run 32-bit ARM natively. |
@@ -221,7 +221,7 @@ Vulkan recorder thread (big core) -> GPU          Presenter thread (small core) 
 - There is one job system. No subsystem creates its own thread pool. That avoids the
   roughly 35 overlapping threads Uberhar reached.
 
-### 5.3 Later: guest cores on separate threads (Phase 7)
+### 5.3 Later: guest cores on separate threads (Phase 8)
 
 The 3DS's second core (system) and the New 3DS's extra cores can each get a host
 thread. This needs a thread-safe kernel. It helps New 3DS titles and games that use
@@ -356,18 +356,21 @@ settings.
 
 | Phase | Delivers | Done when |
 |---|---|---|
-| **0. Groundwork** | New repository and CI (direct APK). A device-probe screen that records Vulkan features, blend-variant creation cost, core layout, displays and controllers. Stock Azahar baselines on your devices. | Probe results from the Thor ([findings](PHASE0_FINDINGS.md)). Blending method chosen (Section 4.2), with method B as the fallback any driver can use. The Duo's probe, when it arrives, confirms or narrows the choice before Phase 2 is tested on it. |
-| **1. New core on reused parts** | Rewritten main loop, timing, job system, PICA thread (Accurate mode first), DSP thread, presenter. Azahar services and loader adapted. Bring-up renderer: CPU mode, single-threaded. | Homebrew and Dark Moon boot and play at reduced speed with both screens, controls and audio. `skipped = 0`, `compile_waits = 0`. |
-| **2. Hybrid mode** | Precompiled ubershader Vulkan backend, "Preparing graphics" screen, one host format, render-pass merging. | Cold first run of Dark Moon with no compile pauses (counter 0) and no skipped draws. Speed compared with Azahar. |
+| **0. Groundwork** — done on the Thor | New repository and CI (direct APK). A device-probe screen that records Vulkan features, blend-variant creation cost, core layout, displays and controllers. | Probe results from the Thor ([findings](PHASE0_FINDINGS.md)): method B blending with on-demand variants, an always-ready ubershader with background specialization. The Duo's probe, when it arrives, confirms or narrows the choice. |
+| **1. Zero-pause shading** | A PICA fragment ubershader covering every fragment feature, checked pixel for pixel against Azahar's specialized shaders. Azahar's Vulkan renderer draws with it whenever a specialized pipeline is not ready, compiles specialized pipelines on worker threads and swaps them in, creates blend variants on demand that cannot compile, and keeps the pipeline cache. Counters for compile waits and skipped draws. | Cold first run of Dark Moon on the Thor with `compile_waits = 0`, `skipped = 0` and no shader hitches. Speed compared with Azahar. |
+| **2. New core on reused parts** | Rewritten main loop, timing, job system, PICA thread (Accurate mode first), DSP thread, presenter, drawing through the Phase 1 renderer. Azahar services and loader adapted. | Homebrew, Dark Moon and FEA play with both screens, controls and audio; counters still 0; speed at least Phase 1's. |
 | **3. Multicore pipeline** | Asynchronous PICA with guest-time completion and page protection; geometry and texture jobs; performance-hint session; per-game Accurate fallback. | Measured frame-time gain over Phase 2 and over Azahar on the Thor. Thread activity shows the planned spread. |
-| **4. Combo mode** | Background specialization and optional GPU vertex shading for ready programs. | Same zero counters. Combo faster than Hybrid at 2x+ on at least one test scene, or reported as not helping. |
-| **5. CPU mode, multicore** | Tiled CPU renderer on all cores, background compiled fragment path. | Dark Moon playable at 1x in CPU mode on the Thor. Pixel tests match the reference. |
-| **6. Feature parity** | Custom textures, stereo 3D, save states, cheats, Amiibo, multiplayer, Artic Base, camera and microphone, per-game settings, device table entries. | Azahar feature checklist complete. |
-| **7. Guest cores on threads, fast memory** | Thread-safe kernel, guest system and New 3DS cores on their own threads, fast host memory mapping. | New 3DS title tests; no regressions in Accurate mode. |
-| **8. Tuning for the Duo** | Persistent translation cache, profile-guided warm-up, per-device defaults. | Duo targets met (Section 13). |
+| **4. New Vulkan backend (Hybrid)** | CPU geometry with one vertex format, one host color and depth format, render-pass merging, the Phase 1 ubershader and blend variants. | Same zero counters. Faster than Phase 3 at 2x on the Thor. |
+| **5. Combo mode** | Background specialization on the new backend and optional GPU vertex shading for ready programs. | Same zero counters. Combo faster than Hybrid at 2x+ on at least one test scene, or reported as not helping. |
+| **6. CPU mode, multicore** | Tiled CPU renderer on all cores, background compiled fragment path. | Dark Moon playable at 1x in CPU mode on the Thor. Pixel tests match the reference. |
+| **7. Feature parity** | Custom textures, stereo 3D, save states, cheats, Amiibo, multiplayer, Artic Base, camera and microphone, per-game settings, device table entries. | Azahar feature checklist complete. |
+| **8. Guest cores on threads, fast memory** | Thread-safe kernel, guest system and New 3DS cores on their own threads, fast host memory mapping. | New 3DS title tests; no regressions in Accurate mode. |
+| **9. Tuning for the Duo** | Persistent translation cache, profile-guided warm-up, per-device defaults. | Duo targets met (Section 13). |
 
-Phases 0–2 produce the first build where the no-pause and no-skip rules hold on a
-real game. Phase 3 is where multicore speed is measured.
+Phase 1 produces the first build where the no-pause and no-skip rules hold on a real
+game. Phase 3 is where multicore speed is measured. Phase 0 showed that the zero-pause
+shading works inside Azahar's renderer, so it comes first (decision 4 in the
+[findings](PHASE0_FINDINGS.md)).
 
 ---
 
@@ -403,7 +406,7 @@ design can remove.
 | The Duo's driver lacks features methods A or C need | Method B works on any Vulkan driver; Phase 0 measures its preparation time. |
 | First-launch preparation is too long | All cores compile in parallel, the cache persists, and the variant set is reduced by method A or C where available. Measured in Phase 0. |
 | Asynchronous GPU breaks a game's timing | Per-game Accurate mode, the same ordering as Azahar. |
-| Thread-safe kernel work is large | Deferred to Phase 7; most games are limited by the main stream. |
+| Thread-safe kernel work is large | Deferred to Phase 8; most games are limited by the main stream. |
 | Scope and time | Reuse, line budgets, and a working APK at every phase. |
 | Model strings for the Duo/DDS unknown | Generic Azahar behavior until a log from a real unit confirms them. |
 

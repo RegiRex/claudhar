@@ -1,0 +1,31 @@
+== Claudhar crash report ==
+app: io.github.regirex.claudhar f835cb3-vanilla (f835cb3)
+time: Tue Oct 27 21:08:28 EDT 2026  kind: native crash  status: 11
+description: crash
+memory: pss 125 MiB, rss 257 MiB
+signal: SIGSEGV (SEGV_MAPERR) fault address 0x0
+threads: 29554 NativeEmulation, 29555 NativeEmulation, 29556 NativeEmulation, 29557 binder:28988_6, 29368 citra:Log, 29369 DefaultDispatch, 29370 DefaultDispatch, 29371 DefaultDispatch, 28988 egirex.claudhar, 29567 AudioTrack, 29056 queued-work-loo, 29569 FSUSER_Worker, 28996 Signal Catcher, 28997 perfetto_hprof_, 28998 Jit thread pool, 29575 NativeEmulation, 28999 HeapTaskDaemon, 29576 VulkanWorker, 29000 ReferenceQueueD, 29001 FinalizerDaemon, 29002 FinalizerWatchd, 29004 binder:28988_1, 29005 binder:28988_2, 29008 binder:28988_3, 29009 Profile Saver, 29011 WM.task-1, 29524 binder:28988_5, 29460 pool-2-thread-1, 29461 TcmReceiver, 29013 WM.task-2, 29015 RenderThread, 29465 ConnectivityThr, 29466 DefaultDispatch, 29467 OkHttp Connecti, 29019 hwuiTask0, 29020 hwuiTask1, 29021 VsyncReceiver, 29022 binder:28988_4, 29471 Okio Watchdog, 29026 binder:28988_4, 29543 RenderThread, 29544 RenderThread, 29548 PlayTimeReport, 29549 NativeEmulation, 29550 InsetsAnimation
+crashing thread 29549 "NativeEmulation":
+  #00 rel_pc 0x0 <unknown> (+0) BuildId 
+  #01 rel_pc 0x21f45c8 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Vulkan::CreateSurface(vk::Instance, Frontend::EmuWindow const&)+100) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #02 rel_pc 0x21fab9c /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Vulkan::PresentWindow::PresentWindow(Frontend::EmuWindow&, Vulkan::Instance const&, Vulkan::Scheduler&, bool)+84) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #03 rel_pc 0x21a1064 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Vulkan::RendererVulkan::RendererVulkan(Core::System&, Pica::PicaCore&, Frontend::EmuWindow&, Frontend::EmuWindow*)+372) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #04 rel_pc 0x2155ee8 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (VideoCore::CreateRenderer(Frontend::EmuWindow&, Frontend::EmuWindow*, Pica::PicaCore&, Core::System&)+236) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #05 rel_pc 0x2117410 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (VideoCore::GPU::GPU(Core::System&, Frontend::EmuWindow&, Frontend::EmuWindow*)+332) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #06 rel_pc 0x1c39934 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Core::System::Init(Frontend::EmuWindow&, Frontend::EmuWindow*, Kernel::MemoryMode, unsigned int)+2900) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #07 rel_pc 0x1c3cbf0 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Core::System::Load(Frontend::EmuWindow&, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&, Frontend::EmuWindow*)+960) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #08 rel_pc 0x1bcbf5c /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/lib/arm64/libcitra-android.so (Java_org_citra_citra_1emu_NativeLibrary_run__Ljava_lang_String_2+2684) BuildId fd0b3d3bea530b9b0ea63eaf245b04a6cc572901
+  #09 rel_pc 0x21a354 /apex/com.android.art/lib64/libart.so (art_quick_generic_jni_trampoline+148) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #10 rel_pc 0x20a2b0 /apex/com.android.art/lib64/libart.so (nterp_helper+4016) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #11 rel_pc 0x30f6e6 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/base.apk (org.citra.citra_emu.fragments.EmulationFragment$EmulationState.runWithValidSurface$lambda$0+22) BuildId 
+  #12 rel_pc 0x209334 /apex/com.android.art/lib64/libart.so (nterp_helper+52) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #13 rel_pc 0x30f4b4 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/base.apk (org.citra.citra_emu.fragments.EmulationFragment$EmulationState.$r8$lambda$CbWtgIeEfuGk5ouQZvqTTpOm7JI+0) BuildId 
+  #14 rel_pc 0x209334 /apex/com.android.art/lib64/libart.so (nterp_helper+52) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #15 rel_pc 0x30f2e4 /data/app/~~Cwk-Wfxn8Kbdj7BEa2jbvw==/io.github.regirex.claudhar-Xxm7d9sSzN79cxID_1c0gw==/base.apk (org.citra.citra_emu.fragments.EmulationFragment$EmulationState$$ExternalSyntheticLambda0.run+4) BuildId 
+  #16 rel_pc 0x17fe80 /system/framework/arm64/boot.oat (java.lang.Thread.run+80) BuildId 6b4afa50efda7c0cb79341b249734ad34f9a6d62
+  #17 rel_pc 0x21096c /apex/com.android.art/lib64/libart.so (art_quick_invoke_stub+556) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #18 rel_pc 0x27b478 /apex/com.android.art/lib64/libart.so (art::ArtMethod::Invoke(art::Thread*, unsigned int*, unsigned int, art::JValue*, char const*)+188) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #19 rel_pc 0x6118e8 /apex/com.android.art/lib64/libart.so (art::JValue art::InvokeVirtualOrInterfaceWithJValues<art::ArtMethod*>(art::ScopedObjectAccessAlreadyRunnable const&, _jobject*, art::ArtMethod*, jvalue const*)+464) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #20 rel_pc 0x659b9c /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallback(void*)+1292) BuildId 3fdfb8b8ec5407af450c28a00ba584a8
+  #21 rel_pc 0xba650 /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+208) BuildId bf5f1ce73f89cca7d6a062eb7877e86a
+  #22 rel_pc 0x53ffc /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+68) BuildId bf5f1ce73f89cca7d6a062eb7877e86a
