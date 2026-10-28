@@ -3,13 +3,19 @@
 # Refer to the LICENSE.txt file included.
 #
 # Claudhar CI: builds the ARM64 Android test APK as a direct download and runs the
-# C++ tests on Linux, for every push to main or a claude/ working branch. Pushing a
-# version tag (for example 0.0.1-alpha) also publishes that build as a GitHub
-# prerelease with the APK attached, once both jobs are green.
+# C++ tests on Linux, for every push to main or a claude/ working branch. A run
+# started by hand with an alpha version, or a pushed version tag (for example
+# 0.0.1-alpha), also publishes that build as a GitHub prerelease with the APK
+# attached, once both jobs are green.
 name: Claudhar
 
 on:
   workflow_dispatch:
+    inputs:
+      alpha:
+        description: 'Publish this build as a prerelease with this version, for example 0.0.2-alpha (leave empty to only build)'
+        required: false
+        default: ''
   push:
     branches: ['main', 'claude/**']
     tags: ['[0-9]*.[0-9]*.[0-9]*']
@@ -20,9 +26,15 @@ permissions:
   contents: read
 
 concurrency:
-  # Only the newest push on a branch matters for testing.
-  group: claudhar-${{ github.ref }}
+  # Only the newest push on a branch matters for testing. A run started by hand is in its
+  # own group, so a push does not cancel a release.
+  group: claudhar-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
+
+env:
+  # The version this run publishes, or empty: the tag that was pushed, or the version
+  # given to a run started by hand.
+  RELEASE: ${{ github.ref_type == 'tag' && github.ref_name || inputs.alpha }}
 
 jobs:
   # Compile the emulator core for Linux and run its C++ test suite.
@@ -30,6 +42,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      # A release version must look like full.beta.alpha with an optional suffix.
+      - name: Check release version
+        if: env.RELEASE != ''
+        run: |
+          if [[ ! "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?$ ]]; then
+            echo "::error::'$RELEASE' is not a version such as 0.0.2-alpha"
+            exit 1
+          fi
       - uses: actions/checkout@v6
         with:
           # The license check compares against the Azahar import commit.
@@ -152,9 +172,9 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64" NDK_CCACHE="$(command -v ccache)"
           export ANDROID_KEYSTORE_FILE="$KEYSTORE" ANDROID_KEYSTORE_PASS="$KEY_PASS"
           export ANDROID_KEY_ALIAS="$KEY_ALIAS"
-          # A tag build takes its version name from the tag; others use git describe.
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            export GIT_TAG_NAME="$GITHUB_REF_NAME"
+          # A release build is named after its version; others use git describe.
+          if [[ -n "$RELEASE" ]]; then
+            export GIT_TAG_NAME="$RELEASE"
           fi
           bash ./gradlew --no-daemon assembleVanillaRelease 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
@@ -166,8 +186,8 @@ jobs:
           TOOLS="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           mkdir -p artifacts
           SHA="$(git rev-parse --short=9 HEAD)"
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            APK="artifacts/claudhar-$GITHUB_REF_NAME-arm64.apk"
+          if [[ -n "$RELEASE" ]]; then
+            APK="artifacts/claudhar-$RELEASE-arm64.apk"
           else
             APK="artifacts/claudhar-${{ github.run_number }}-$SHA-arm64.apk"
           fi
@@ -175,8 +195,8 @@ jobs:
           "$TOOLS/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='io.github.regirex.claudhar'" artifacts/package.txt
           grep -F "application-label:'Claudhar'" artifacts/package.txt
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            grep -F "versionName='$GITHUB_REF_NAME-vanilla'" artifacts/package.txt
+          if [[ -n "$RELEASE" ]]; then
+            grep -F "versionName='$RELEASE-vanilla'" artifacts/package.txt
           fi
           "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           (cd artifacts && sha256sum "$(basename "$APK")" > apk-sha256.txt)
@@ -194,9 +214,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # A tag build's APK, zipped under a fixed name, for the release job to attach.
+      # A release build's APK, zipped under a fixed name, for the release job to attach.
       - name: Upload release APK
-        if: github.ref_type == 'tag'
+        if: env.RELEASE != ''
         uses: actions/upload-artifact@v7
         with:
           name: claudhar-release-apk
@@ -247,10 +267,11 @@ jobs:
             ~/.cache/ccache
           key: claudhar-android-v1-${{ github.run_id }}
 
-  # Publishes a version tag's build as a prerelease once the tests and the APK are green.
-  # The release notes are docs/releases/<tag>.md, committed before the tag is pushed.
+  # Publishes a release build as a prerelease once the tests and the APK are green. The
+  # release notes are docs/releases/<version>.md in the commit being built. A run started
+  # by hand creates the tag on that commit.
   release:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.alpha != ''
     needs: [native-tests, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -265,17 +286,22 @@ jobs:
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          NOTES="docs/releases/$TAG.md"
+          NOTES="docs/releases/$RELEASE.md"
           if [[ ! -f "$NOTES" ]]; then
             echo "::error::No release notes at $NOTES"
             exit 1
           fi
           gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name claudhar-release-apk --dir dist
-          gh release create "$TAG" dist/*.apk --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --prerelease --title "Claudhar $TAG" --notes-file "$NOTES"
-          echo "### Published [Claudhar $TAG]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
+          # A pushed tag already exists; otherwise the release creates it on this commit.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TARGET=(--verify-tag)
+          else
+            TARGET=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$RELEASE" dist/*.apk --repo "$GITHUB_REPOSITORY" "${TARGET[@]}" \
+            --prerelease --title "Claudhar $RELEASE" --notes-file "$NOTES"
+          echo "### Published [Claudhar $RELEASE]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE)" \
             >> "$GITHUB_STEP_SUMMARY"

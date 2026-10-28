@@ -25,12 +25,14 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
   and its CI run is green. Never push to Azahar's repository or to `RegiRex/uberhar`.
 - `.github/workflows/claudhar.yml` builds the APK as a direct download and runs the
   C++ tests. Only call a build ready when both of its jobs are green.
-- Versions are `full.beta.alpha`. An alpha is published by committing its notes as
-  `docs/releases/<version>-alpha.md` and pushing the tag `<version>-alpha` (for
-  example `0.0.2-alpha`) on that commit: CI builds it, and publishes a GitHub prerelease
-  with the APK once both jobs are green. Push only that tag, never `--tags`: the clone
-  holds Azahar's own tags. Publish an alpha when a build is worth testing on a device;
-  beta status needs device evidence, not a count of builds.
+- Versions are `full.beta.alpha`. To publish an alpha, commit its notes as
+  `docs/releases/<version>.md` (for example `docs/releases/0.0.2-alpha.md`), push the
+  branch, and run the Claudhar workflow by hand on that branch with `alpha` set to the
+  version. The run builds and tests the branch's newest commit and, when both jobs are
+  green, publishes a GitHub prerelease with the APK and creates the tag on that commit.
+  Pushing a version tag does the same; never push `--tags`, because the clone holds
+  Azahar's own tags. Publish an alpha when a build is worth testing on a device; beta
+  status needs device evidence, not a count of builds.
 
 ## Code
 
