@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 
@@ -361,7 +362,11 @@ void FragmentModule::AppendColorCombiner(Pica::TexturingRegs::TevStageConfig::Op
         case Operation::Add:
             return "color_results_1 + color_results_2";
         case Operation::AddSigned:
-            return "color_results_1 + color_results_2 - vec3(0.5)";
+            // Claudhar: subtract 128/255, as the software renderer subtracts 128, instead of
+            // 0.5. With 8-bit inputs 0.5 puts every result exactly between two steps, so the
+            // rounding direction depended on how the driver ordered the additions, and the
+            // ubershader and this shader rounded differently.
+            return "color_results_1 + color_results_2 - vec3(128.0 / 255.0)";
         case Operation::Lerp:
             return "mix(color_results_2, color_results_1, color_results_3)";
         case Operation::Subtract:
@@ -392,7 +397,8 @@ void FragmentModule::AppendAlphaCombiner(Pica::TexturingRegs::TevStageConfig::Op
         case Operation::Add:
             return "alpha_results_1 + alpha_results_2";
         case Operation::AddSigned:
-            return "alpha_results_1 + alpha_results_2 - 0.5";
+            // Claudhar: 128/255 instead of 0.5; see the color combiner.
+            return "alpha_results_1 + alpha_results_2 - (128.0 / 255.0)";
         case Operation::Lerp:
             return "mix(alpha_results_2, alpha_results_1, alpha_results_3)";
         case Operation::Subtract:
@@ -1765,6 +1771,11 @@ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& use
                                    const Profile& profile) {
     FragmentModule module{config, user, profile};
     return module.Generate();
+}
+
+// Claudhar: shares the uniform block text with the fragment ubershader.
+std::string_view GetFSUniformBlockDef() {
+    return FSUniformBlockDef;
 }
 
 } // namespace Pica::Shader::Generator::GLSL

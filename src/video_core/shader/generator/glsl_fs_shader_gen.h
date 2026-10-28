@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -100,5 +101,9 @@ private:
  */
 std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& user,
                                    const Profile& profile);
+
+// Claudhar: returns the declaration of the fs_data uniform block (binding 2), so the
+// fragment ubershader declares it with exactly the text the specialized shaders use.
+std::string_view GetFSUniformBlockDef();
 
 } // namespace Pica::Shader::Generator::GLSL

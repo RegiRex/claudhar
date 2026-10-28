@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <boost/container/small_vector.hpp>
 #include "video_core/shader/generator/pica_fs_config.h"
@@ -586,15 +587,20 @@ void FragmentModule::WriteLighting() {
 
         const Id light_diffuse{GetLightMember(2)};
         const Id light_ambient{GetLightMember(3)};
-        const Id diffuse_mul_dot{OpVectorTimesScalar(vec_ids.Get(3), light_diffuse, dot_product)};
+        Id diffuse_mul_dot{OpVectorTimesScalar(vec_ids.Get(3), light_diffuse, dot_product)};
+
+        // Claudhar: the primary shadow multiplies the diffuse term only, before the ambient
+        // term is added, as in the software renderer (sw_lighting.cpp) and the GLSL generator.
+        // This code multiplied the whole sum, so shadows also darkened the ambient light, and
+        // the fragment ubershader, which follows the reference, would not match it.
+        if (shadow_primary_enable) {
+            diffuse_mul_dot = OpFMul(vec_ids.Get(3), diffuse_mul_dot, shadow_rgb);
+        }
 
         // Compute primary fragment color (diffuse lighting) function
         Id diffuse_sum_rgb{OpFAdd(vec_ids.Get(3), diffuse_mul_dot, light_ambient)};
         diffuse_sum_rgb = OpVectorTimesScalar(vec_ids.Get(3), diffuse_sum_rgb, dist_atten);
         diffuse_sum_rgb = OpVectorTimesScalar(vec_ids.Get(3), diffuse_sum_rgb, spot_atten);
-        if (shadow_primary_enable) {
-            diffuse_sum_rgb = OpFMul(vec_ids.Get(3), diffuse_sum_rgb, shadow_rgb);
-        }
 
         // Compute secondary fragment color (specular lighting) function
         const Id specular_01{OpFAdd(vec_ids.Get(3), specular_0, specular_1)};
@@ -1129,7 +1135,10 @@ Id FragmentModule::ProcTexSampler() {
         const Id lod_f{OpFract(f32_id, lod)};
         const Id color1{SampleProcTexColor(lut_coord, lod_i)};
         const Id color2{SampleProcTexColor(lut_coord, OpIAdd(i32_id, lod_i, ConstS32(1)))};
-        final_color = OpFMix(f32_id, color1, color2, lod_f);
+        // Claudhar: mix the two vec4 colors as vec4s. This was OpFMix with a float result
+        // type, a vec4 pair and a float weight, which is invalid SPIR-V.
+        const Id lod_f_vec{OpCompositeConstruct(vec_ids.Get(4), lod_f, lod_f, lod_f, lod_f)};
+        final_color = OpFMix(vec_ids.Get(4), color1, color2, lod_f_vec);
         break;
     }
     }
@@ -1411,8 +1420,12 @@ Id FragmentModule::AppendColorCombiner(Pica::TexturingRegs::TevStageConfig::Oper
         color = OpFAdd(vec_ids.Get(3), color_results_1, color_results_2);
         break;
     case Operation::AddSigned:
+        // Claudhar: subtract 128/255, as the software renderer subtracts 128, instead of 0.5.
+        // With 8-bit inputs 0.5 puts every result exactly between two steps, so the rounding
+        // direction depended on how the driver ordered the additions, and the ubershader and
+        // this shader rounded differently.
         color = OpFSub(vec_ids.Get(3), OpFAdd(vec_ids.Get(3), color_results_1, color_results_2),
-                       half_vec);
+                       ConstF32(128.f / 255.f, 128.f / 255.f, 128.f / 255.f));
         break;
     case Operation::Lerp:
         color = OpFMix(vec_ids.Get(3), color_results_2, color_results_1, color_results_3);
@@ -1460,7 +1473,9 @@ Id FragmentModule::AppendAlphaCombiner(TevStageConfig::Operation operation) {
         color = OpFAdd(f32_id, alpha_results_1, alpha_results_2);
         break;
     case Operation::AddSigned:
-        color = OpFSub(f32_id, OpFAdd(f32_id, alpha_results_1, alpha_results_2), ConstF32(0.5f));
+        // Claudhar: 128/255 instead of 0.5; see the color combiner.
+        color = OpFSub(f32_id, OpFAdd(f32_id, alpha_results_1, alpha_results_2),
+                       ConstF32(128.f / 255.f));
         break;
     case Operation::Lerp:
         color = OpFMix(f32_id, alpha_results_2, alpha_results_1, alpha_results_3);
