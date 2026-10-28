@@ -44,15 +44,17 @@ Code: `src/claudhar/shading/fs_ubershader.*` (generator and configuration buffer
 Every few seconds the log has a line like
 
 ```
-Claudhar shading: drawn 120344 (specialized GPU-vertex 101200, specialized CPU-vertex 15022,
-ubershader 4122), empty 310, invalid 0, CPU-vertex fallbacks 3890, pipelines building 0,
-compile_waits 0, skipped 0
+Claudhar shading: requested 120654, drawn 120344 (specialized GPU-vertex 101200, specialized
+CPU-vertex 15022, ubershader 4122), empty 310, invalid 0, CPU-vertex fallbacks 3890,
+pipelines building 0, compile_waits 0, skipped 0
 ```
 
-`compile_waits` and `skipped` must be 0. A compile wait also logs the pipeline state the
-driver could not create from its cache, so the preparation can be extended to cover it.
-`CPU-vertex fallbacks` counts GPU-vertex draws shaded on the CPU because their pipeline was
-still compiling; they are also counted in the drawn totals.
+`compile_waits` and `skipped` must be 0. Every draw the renderer is asked for is counted
+as requested and again by its outcome; `skipped` is the difference, so a draw dropped by
+any path shows up there. A compile wait also logs the pipeline state the driver could not
+create from its cache, so the preparation can be extended to cover it. `CPU-vertex
+fallbacks` counts GPU-vertex draws shaded on the CPU because their pipeline was still
+compiling; each is requested and drawn once, on the CPU.
 
 ## Matching Azahar's shaders
 

@@ -459,7 +459,9 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     vertex_info = AnalyzeVertexArray(is_indexed, instance.GetMinVertexStrideAlignment());
     if (vertex_info.Invalid()) {
         // Do not draw anything if the vertex array is invalid.
-        ++pipeline_cache.Ledger().invalid; // Claudhar: counted, not silently dropped.
+        // Claudhar: counted, not silently dropped.
+        ++pipeline_cache.Ledger().requested;
+        ++pipeline_cache.Ledger().invalid;
         return true;
     }
     SetupVertexArray();
@@ -471,7 +473,11 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
         return false;
     }
 
-    return Draw(true, is_indexed);
+    // Claudhar: an accepted draw is requested here; one returned to the CPU path is
+    // requested again by DrawTriangles.
+    const bool accepted = Draw(true, is_indexed);
+    pipeline_cache.Ledger().requested += accepted;
+    return accepted;
 }
 
 bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
@@ -536,6 +542,7 @@ void RasterizerVulkan::SetupIndexArray() {
 }
 
 void RasterizerVulkan::DrawTriangles() {
+    ++pipeline_cache.Ledger().requested; // Claudhar: see AccelerateDrawBatch.
     if (vertex_batch.empty()) {
         // Claudhar: every triangle was clipped or culled, or the draw had no vertices.
         ++pipeline_cache.Ledger().empty;

@@ -13,16 +13,17 @@ namespace Claudhar::Shading {
 
 std::string DrawLedger::Summary() const {
     return fmt::format(
-        "drawn {} (specialized GPU-vertex {}, specialized CPU-vertex {}, ubershader {}), "
-        "empty {}, invalid {}, CPU-vertex fallbacks {}, pipelines building {}, "
+        "requested {}, drawn {} (specialized GPU-vertex {}, specialized CPU-vertex {}, "
+        "ubershader {}), empty {}, invalid {}, CPU-vertex fallbacks {}, pipelines building {}, "
         "compile_waits {}, skipped {}",
-        Drawn(), specialized_gpu_vertices, specialized_cpu_vertices, ubershader, empty, invalid,
-        cpu_vertex_fallbacks, building.load(std::memory_order_relaxed), compile_waits, skipped);
+        requested, Drawn(), specialized_gpu_vertices, specialized_cpu_vertices, ubershader, empty,
+        invalid, cpu_vertex_fallbacks, building.load(std::memory_order_relaxed), compile_waits,
+        Skipped());
 }
 
 void DrawLedger::LogPeriodically(std::chrono::seconds interval) {
     const auto now = std::chrono::steady_clock::now();
-    const u64 rule_breaks = compile_waits + skipped;
+    const u64 rule_breaks = compile_waits + Skipped();
     const bool rule_broken = rule_breaks != logged_rule_breaks;
     if (!rule_broken && (Drawn() == logged_drawn || now - last_log < interval)) {
         return;

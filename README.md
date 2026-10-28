@@ -68,9 +68,9 @@ before installing the new one.
 While a game runs, the log (Options → Share log) gets a line every few seconds:
 
 ```
-Claudhar shading: drawn ... (specialized GPU-vertex ..., specialized CPU-vertex ...,
-ubershader ...), empty ..., invalid ..., CPU-vertex fallbacks ..., pipelines building ...,
-compile_waits 0, skipped 0
+Claudhar shading: requested ..., drawn ... (specialized GPU-vertex ..., specialized
+CPU-vertex ..., ubershader ...), empty ..., invalid ..., CPU-vertex fallbacks ...,
+pipelines building ..., compile_waits 0, skipped 0
 ```
 
 `compile_waits` and `skipped` must stay 0. Anything else is a bug worth reporting with
