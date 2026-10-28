@@ -1,7 +1,10 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include <chrono>
+#include <utility>
 #include <boost/container/static_vector.hpp>
 
 #include "common/common_paths.h"
@@ -10,6 +13,7 @@
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/thread_worker.h"
 #include "core/core.h"
 #include "core/loader/loader.h"
 #include "video_core/pica/shader_setup.h"
@@ -56,7 +60,8 @@ AttribLoadFlags MakeAttribLoadFlag(Pica::PipelineRegs::VertexAttributeFormat for
     }
 }
 
-constexpr std::array<vk::DescriptorSetLayoutBinding, 6> BUFFER_BINDINGS = {{
+// Claudhar: binding 6 holds the fragment ubershader's configuration.
+constexpr std::array<vk::DescriptorSetLayoutBinding, 7> BUFFER_BINDINGS = {{
     {0, vk::DescriptorType::eUniformBufferDynamic, 1, vk::ShaderStageFlagBits::eVertex},
     {1, vk::DescriptorType::eUniformBufferDynamic, 1,
      vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eGeometry},
@@ -64,7 +69,15 @@ constexpr std::array<vk::DescriptorSetLayoutBinding, 6> BUFFER_BINDINGS = {{
     {3, vk::DescriptorType::eUniformTexelBuffer, 1, vk::ShaderStageFlagBits::eFragment},
     {4, vk::DescriptorType::eUniformTexelBuffer, 1, vk::ShaderStageFlagBits::eFragment},
     {5, vk::DescriptorType::eUniformTexelBuffer, 1, vk::ShaderStageFlagBits::eFragment},
+    {Claudhar::Shading::UBER_CONFIG_BINDING, vk::DescriptorType::eUniformBufferDynamic, 1,
+     vk::ShaderStageFlagBits::eFragment},
 }};
+
+// Claudhar: stands in for the fragment shader in an ubershader pipeline's key. Specialized
+// pipelines use the FSConfig hash there, which these values do not collide with in practice.
+constexpr u64 UberShaderId(const Claudhar::Shading::UberKey& key) {
+    return 0xC1A0D4A500000000ULL | key.Index();
+}
 
 template <u32 NumTex0>
 constexpr std::array<vk::DescriptorSetLayoutBinding, 3> TEXTURE_BINDINGS = {{
@@ -148,12 +161,17 @@ PipelineCache::~PipelineCache() {
     pipeline_workers.WaitForRequests();
     shader_workers.WaitForRequests();
     SaveDriverPipelineDiskCache();
+    // Claudhar: keeps the ubershader variants that were created during play.
+    SaveUberPipelineCache();
+    LOG_INFO(Render_Vulkan, "Claudhar shading at exit: {}", ledger.Summary());
 }
 
 void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
                               const VideoCore::DiskResourceLoadCallback& callback) {
     LoadDriverPipelineDiskCache(stop_loading, callback);
     LoadDiskCache(stop_loading, callback);
+    // Claudhar: the ubershader must be ready before the first draw.
+    PrepareUbershaders(stop_loading, callback);
 }
 
 void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loading,
@@ -363,18 +381,251 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
     }
 }
 
-bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
+// Claudhar: see the header. Nothing here waits for a compile or drops a draw.
+FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices, bool specialize) {
     MICROPROFILE_SCOPE(Vulkan_Bind);
 
     for (u32 i = 0; i < MAX_SHADER_STAGES; i++) {
         info.state.shader_ids[i] = shader_hashes[i];
     }
 
-    GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
-    if (!pipeline->IsDone() && !pipeline->TryBuild(wait_built)) {
-        return false;
+    if (specialize) {
+        GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
+        if (pipeline->IsDone() || pipeline->TryBuildCached()) {
+            selected_pipeline = pipeline;
+            uber_selected = false;
+            return FragmentPath::Specialized;
+        }
+        pipeline->BuildInBackground(ledger.building);
     }
 
+    // Only the CPU-vertex layout has ubershader pipelines; a GPU-vertex draw is shaded on
+    // the CPU instead until its own pipeline is built.
+    if (gpu_vertices) {
+        ++ledger.cpu_vertex_fallbacks;
+        return FragmentPath::CpuVertices;
+    }
+    selected_pipeline = UberPipeline(info);
+    uber_selected = true;
+    return FragmentPath::Ubershader;
+}
+
+bool PipelineCache::TakeUberConfig(Claudhar::Shading::UberConfig& out) {
+    if (!uber_selected || (taken_uber_config && *taken_uber_config == *fs_config)) {
+        return false;
+    }
+    Pica::Shader::FSConfig applied = *fs_config;
+    applied.ApplyProfile(profile);
+    out = Claudhar::Shading::MakeUberConfig(applied);
+    taken_uber_config = fs_config;
+    return true;
+}
+
+GraphicsPipeline* PipelineCache::UberPipeline(const PipelineInfo& info) {
+    using Claudhar::Shading::UberKey;
+    const UberKey key = Claudhar::Shading::MakeUberKey(*fs_config, fs_user, profile);
+    if (!uber_pipeline_cache || !uber_shaders[key.Index()]) {
+        // Only custom textures turned on after loading can need a variant that was not
+        // prepared; compiling it now is a wait, and is counted as one.
+        ++ledger.compile_waits;
+        LOG_WARNING(Render_Vulkan, "Claudhar: compiling ubershader variant {} during play",
+                    key.Index());
+        if (!uber_pipeline_cache) {
+            LoadUberPipelineCache();
+        }
+        uber_shaders[key.Index()] =
+            std::make_unique<Shader>(instance, vk::ShaderStageFlagBits::eFragment,
+                                     Claudhar::Shading::GenerateFragmentUbershader(key, profile));
+    }
+
+    PipelineInfo uber_info = info;
+    uber_info.state.shader_ids = {0, UberShaderId(key), 0};
+    auto [it, inserted] = uber_pipelines.try_emplace(uber_info.state.OptimizedHash(instance));
+    if (inserted) {
+        it.value() = std::make_unique<GraphicsPipeline>(
+            instance, renderpass_cache, uber_info, *uber_pipeline_cache, *pipeline_layout,
+            std::array<Shader*, MAX_SHADER_STAGES>{&trivial_vertex_shader,
+                                                   uber_shaders[key.Index()].get(), nullptr},
+            &pipeline_workers);
+    }
+    GraphicsPipeline* const pipeline = it.value().get();
+    if (!pipeline->IsDone() && !pipeline->TryBuildCached()) {
+        // The driver needed to compile for fixed state the preparation did not cover. The
+        // first few are logged with that state so the preparation can include it.
+        ++ledger.compile_waits;
+        if (ledger.compile_waits <= 16) {
+            const auto& state = uber_info.state;
+            LOG_WARNING(Render_Vulkan,
+                        "Claudhar: ubershader pipeline compiled during play: variant {}, color {}, "
+                        "depth {}, blend {} {:08x}, write mask {:x}, logic op {}",
+                        key.Index(), VideoCore::PixelFormatAsString(state.attachments.color),
+                        VideoCore::PixelFormatAsString(state.attachments.depth),
+                        state.blending.blend_enable, state.blending.value,
+                        state.blending.color_write_mask, state.blending.logic_op);
+        }
+        pipeline->Build();
+    }
+    return pipeline;
+}
+
+void PipelineCache::PrepareUbershaders(const std::atomic_bool& stop_loading,
+                                       const VideoCore::DiskResourceLoadCallback& callback) {
+    using Claudhar::Shading::UberKey;
+    using VideoCore::PixelFormat;
+    if (uber_pipeline_cache) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    if (callback) {
+        callback(VideoCore::LoadCallbackStage::Build, 0, 1, "Ubershaders");
+    }
+
+    // Custom normal maps come only from custom textures, and only GLSL shaders read them.
+    std::vector<UberKey> keys;
+    std::vector<std::string> sources;
+    for (u32 i = 0; i < UberKey::NUM_VARIANTS; ++i) {
+        const UberKey key = UberKey::FromIndex(i);
+        if (key.custom_normal && !(Settings::values.custom_textures.GetValue() &&
+                                   Claudhar::Shading::UsesGlslSemantics(key, profile))) {
+            continue;
+        }
+        keys.push_back(key);
+        sources.push_back(Claudhar::Shading::GenerateFragmentUbershader(key, profile));
+    }
+    u64 sources_hash = 0;
+    for (const auto& source : sources) {
+        sources_hash =
+            Common::HashCombine(sources_hash, Common::ComputeHash64(source.data(), source.size()));
+    }
+    uber_pipeline_cache_path =
+        fmt::format("{}claudhar-ubershader-{:016X}.bin", GetPipelineCacheDir(), sources_hash);
+    LoadUberPipelineCache();
+
+    // Compile the variants on every core, then create each one's pipeline for every render
+    // target format pair. Pipelines that differ only in other fixed state (blending, write
+    // mask, logic op) are created from this cache without compiling when first drawn.
+    Common::ThreadWorker workers{std::max(std::thread::hardware_concurrency(), 1U),
+                                 "Claudhar prepare"};
+    const vk::Device device = instance.GetDevice();
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        auto& shader = uber_shaders[keys[i].Index()];
+        shader = std::make_unique<Shader>(instance);
+        workers.QueueWork([shader = shader.get(), source = std::move(sources[i]), device] {
+            shader->module =
+                CompileSPV(CompileGLSL(source, vk::ShaderStageFlagBits::eFragment), device);
+            shader->MarkDone();
+        });
+    }
+    workers.WaitForRequests();
+    if (stop_loading) {
+        return;
+    }
+
+    // The first format pair of each variant is built alone, so the driver compiles each
+    // variant once; the other pairs then come from the cache instead of compiling the same
+    // shader on several cores at once.
+    constexpr std::array colors{PixelFormat::RGBA8,  PixelFormat::RGB8,  PixelFormat::RGB5A1,
+                                PixelFormat::RGB565, PixelFormat::RGBA4, PixelFormat::Invalid};
+    constexpr std::array depths{PixelFormat::D24S8, PixelFormat::D16, PixelFormat::D24,
+                                PixelFormat::Invalid};
+    u32 pipelines = 0;
+    for (const bool first_pair : {true, false}) {
+        for (const UberKey& key : keys) {
+            bool first = true;
+            for (const PixelFormat color : colors) {
+                for (const PixelFormat depth : depths) {
+                    // Shadow-map rendering draws without a depth target.
+                    if ((color == PixelFormat::Invalid && depth == PixelFormat::Invalid) ||
+                        (key.shadow_rendering && depth != PixelFormat::Invalid)) {
+                        continue;
+                    }
+                    const bool is_first = std::exchange(first, false);
+                    if (is_first != first_pair) {
+                        continue;
+                    }
+                    PipelineInfo info{};
+                    info.state.shader_ids = {0, UberShaderId(key), 0};
+                    info.state.blending.color_write_mask = 0xF;
+                    info.state.blending.logic_op = Pica::FramebufferRegs::LogicOp::Copy;
+                    info.state.attachments = {color, depth};
+                    info.state.vertex_layout = software_layout;
+                    info.state.rasterization.topology.Assign(
+                        Pica::PipelineRegs::TriangleTopology::List);
+                    auto [it, inserted] =
+                        uber_pipelines.try_emplace(info.state.OptimizedHash(instance));
+                    if (!inserted) {
+                        continue;
+                    }
+                    it.value() = std::make_unique<GraphicsPipeline>(
+                        instance, renderpass_cache, info, *uber_pipeline_cache, *pipeline_layout,
+                        std::array<Shader*, MAX_SHADER_STAGES>{
+                            &trivial_vertex_shader, uber_shaders[key.Index()].get(), nullptr},
+                        &pipeline_workers);
+                    workers.QueueWork([pipeline = it.value().get()] { pipeline->Build(); });
+                    ++pipelines;
+                }
+            }
+        }
+        workers.WaitForRequests();
+    }
+    SaveUberPipelineCache();
+    if (callback) {
+        callback(VideoCore::LoadCallbackStage::Build, 1, 1, "Ubershaders");
+    }
+    LOG_INFO(Render_Vulkan, "Claudhar: prepared {} ubershader variants and {} pipelines in {} ms",
+             keys.size(), pipelines,
+             std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::steady_clock::now() - start)
+                 .count());
+}
+
+void PipelineCache::LoadUberPipelineCache() {
+    std::vector<u8> data;
+    if (Settings::values.use_disk_shader_cache && EnsureDirectories() &&
+        !uber_pipeline_cache_path.empty()) {
+        // Caches made for earlier ubershader sources are of no further use.
+        FileUtil::ForeachDirectoryEntry(
+            nullptr, GetPipelineCacheDir(),
+            [this](u64*, const std::string& directory, const std::string& name) {
+                const std::string path = directory + DIR_SEP + name;
+                if (name.starts_with("claudhar-ubershader-") &&
+                    name != uber_pipeline_cache_path.substr(GetPipelineCacheDir().size())) {
+                    FileUtil::Delete(path);
+                }
+                return true;
+            });
+        FileUtil::IOFile file{uber_pipeline_cache_path, "rb"};
+        if (file.IsOpen()) {
+            data.resize(file.GetSize());
+            if (file.ReadBytes(data.data(), data.size()) != data.size() || !IsCacheValid(data)) {
+                data.clear();
+            }
+        }
+    }
+    const vk::Device device = instance.GetDevice();
+    try {
+        uber_pipeline_cache = device.createPipelineCacheUnique(
+            {.initialDataSize = data.size(), .pInitialData = data.data()});
+    } catch (const vk::SystemError& err) {
+        LOG_ERROR(Render_Vulkan, "Claudhar: ubershader pipeline cache rejected: {}", err.what());
+        uber_pipeline_cache = device.createPipelineCacheUnique({});
+    }
+}
+
+void PipelineCache::SaveUberPipelineCache() {
+    if (!Settings::values.use_disk_shader_cache || !uber_pipeline_cache ||
+        uber_pipeline_cache_path.empty()) {
+        return;
+    }
+    const auto data = instance.GetDevice().getPipelineCacheData(*uber_pipeline_cache);
+    FileUtil::IOFile file{uber_pipeline_cache_path, "wb"};
+    if (!file.IsOpen() || file.WriteBytes(data.data(), data.size()) != data.size()) {
+        LOG_ERROR(Render_Vulkan, "Claudhar: could not save the ubershader pipeline cache");
+    }
+}
+
+void PipelineCache::BindPipeline(PipelineInfo& info) {
+    GraphicsPipeline* const pipeline = selected_pipeline;
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
     const bool pipeline_dirty = (current_pipeline != pipeline) || is_dirty;
     scheduler.Record([this, is_dirty, pipeline_dirty, pipeline,
@@ -478,10 +729,8 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
             }
         }
 
+        // Claudhar: the selected pipeline is always built; there is nothing to wait for.
         if (pipeline_dirty) {
-            if (!pipeline->IsDone()) {
-                pipeline->WaitDone();
-            }
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
         }
 
@@ -492,8 +741,6 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
     current_info = info;
     current_pipeline = pipeline;
     scheduler.MarkStateNonDirty(StateFlags::Pipeline | StateFlags::DescriptorSets);
-
-    return true;
 }
 
 ExtraVSConfig PipelineCache::CalcExtraConfig(const PicaVSConfig& config) {
@@ -571,8 +818,10 @@ void PipelineCache::UseTrivialGeometryShader() {
 
 void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
                                       const Pica::Shader::UserConfig& user) {
-
-    auto res = curr_disk_cache->UseFragmentShader(regs, user);
+    // Claudhar: the configuration is kept for the ubershader as well.
+    fs_config.emplace(regs);
+    fs_user = user;
+    auto res = curr_disk_cache->UseFragmentShader(*fs_config, user);
 
     if (res.has_value()) {
         current_shaders[ProgramType::FS] = (*res).second;

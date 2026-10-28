@@ -1,6 +1,7 @@
 // Copyright 2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -33,8 +34,9 @@ public:
 
     std::optional<std::pair<u64, Shader* const>> UseProgrammableVertexShader(
         const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout);
+    // Claudhar: takes the fragment configuration instead of the registers.
     std::optional<std::pair<u64, Shader* const>> UseFragmentShader(
-        const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user);
+        const Pica::Shader::FSConfig& config, const Pica::Shader::UserConfig& user);
     std::optional<std::pair<u64, Shader* const>> UseFixedGeometryShader(
         const Pica::RegsInternal& regs);
 

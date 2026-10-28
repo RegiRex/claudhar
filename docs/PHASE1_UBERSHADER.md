@@ -1,0 +1,127 @@
+# Phase 1: zero-pause shading in Azahar's renderer
+
+Phase 1 removes shader compile pauses and skipped draws from Azahar's Vulkan renderer
+without rewriting it. This note explains the design, what is proven and how, and what is
+left to measure on the Thor.
+
+## What changed
+
+**Before.** Azahar builds one fragment shader per 3DS fragment configuration, and one
+pipeline per shader and fixed-state combination, the first time a draw needs it. With
+asynchronous shaders off (the default) the draw waits for the compile: a visible pause.
+With them on, draws with more than six vertices are skipped until the pipeline is ready.
+
+**Now.** No draw waits and none is skipped:
+
+| Draw | Pipeline built | Pipeline not built yet |
+| --- | --- | --- |
+| Vertices shaded on the CPU | Azahar's specialized pipeline | The **fragment ubershader**; the specialized pipeline is compiled on a worker thread meanwhile |
+| Vertices shaded on the GPU (hardware shader setting) | Azahar's specialized pipeline | Shaded on the CPU instead, then drawn as in the row above; its pipeline is compiled meanwhile |
+
+The ubershader is one GLSL fragment shader that reads the fragment configuration from a
+uniform buffer (binding 6) instead of having it compiled in. A few configuration features
+change what the shader declares (the kind of texture unit 0, shadow-map rendering, custom
+normal maps), so there are up to 16 variants. While the game loads, every variant is
+compiled on all cores, and its pipeline is created for each render target format pair.
+Those pipelines are kept in their own driver pipeline cache file
+(`shaders/vulkan/pipeline/claudhar-ubershader-*.bin`), which is not tied to a game, so
+later launches create them without compiling. Pipelines that differ from those only in
+other fixed state (blending, write mask, logic op) are then created during play with
+`VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT`: Phase 0 measured these at
+0.2–0.4 ms on the Thor, from the cache, with no compile. If the driver ever refuses one,
+it is compiled at once and counted as a compile wait.
+
+Azahar's "asynchronous shader compilation" setting no longer has any effect on Vulkan; it
+chose between waiting and skipping, and neither happens now.
+
+Code: `src/claudhar/shading/fs_ubershader.*` (generator and configuration buffer),
+`src/claudhar/shading/draw_ledger.*` (counters), and changes marked `Claudhar:` in
+`vk_pipeline_cache.*`, `vk_graphics_pipeline.*`, `vk_rasterizer.*` and
+`vk_shader_disk_cache.*`.
+
+## Counters
+
+Every few seconds the log has a line like
+
+```
+Claudhar shading: drawn 120344 (specialized GPU-vertex 101200, specialized CPU-vertex 15022,
+ubershader 4122), empty 310, invalid 0, CPU-vertex fallbacks 3890, pipelines building 0,
+compile_waits 0, skipped 0
+```
+
+`compile_waits` and `skipped` must be 0. A compile wait also logs the pipeline state the
+driver could not create from its cache, so the preparation can be extended to cover it.
+`CPU-vertex fallbacks` counts GPU-vertex draws shaded on the CPU because their pipeline was
+still compiling; they are also counted in the drawn totals.
+
+## Matching Azahar's shaders
+
+The ubershader has to draw what the specialized shader draws, or a surface would change
+when its specialized pipeline swaps in. It follows the generator Azahar uses for the
+configuration: the SPIR-V generator by default, the GLSL generator when that setting is
+off or the configuration needs it (shadow-map rendering, shadow cube textures).
+
+Reading both generators side by side showed three places where they disagree in meaning,
+not only in rounding:
+
+| Feature | SPIR-V generator | GLSL generator and the software renderer | Ubershader |
+| --- | --- | --- | --- |
+| Lighting with a primary shadow | Shadow also darkens the ambient term | Shadow darkens the diffuse term only | Diffuse only; **the SPIR-V generator is fixed to match** |
+| Unknown color modifier (6, 7, 10, 11, 14, 15) | 1.0 | 0.0 | Follows the generator in use |
+| Unknown texture unit 0 type (6, 7) | Black | Samples unit 0 as 2D | Follows the generator in use |
+| Gas fog (unimplemented) | Writes the computed depth | Writes no depth | Follows the generator in use |
+
+The SPIR-V generator also emitted invalid SPIR-V for procedural textures with a mipmap-
+linear filter (a vec4 mix with a float result type); it is fixed.
+
+**AddSigned now subtracts 128/255, in both generators and the ubershader.** It subtracted
+0.5. With 8-bit inputs that puts every result exactly halfway between two 8-bit steps, and
+GLSL leaves the direction of `round()` at a tie to the implementation, so the last bit of
+the sum decided it. The driver orders the additions differently in the straight-line
+specialized shader and in the ubershader's branches, so the two rounded differently on a
+large share of pixels, by one step times the stage's scale. Azahar's software renderer, the
+reference, computes `a + b - 128` in integers; 128/255 is that value, and it never ties.
+Other combiner operations cannot tie, because their results are multiples of 1/255 and 255
+is odd. This changes AddSigned results by at most one step from stock Azahar. For 2D shadow textures
+the SPIR-V generator reads the lighting shadow binding while the GLSL generator reads
+texture unit 0; they hold the same texture when the lighting shadow selects unit 0, which
+is how games use it. The ubershader reads unit 0.
+
+Rounding: where the SPIR-V generator writes a fused multiply-add the ubershader uses
+`fma()`, and where the GLSL generator writes `a * b + c` it does too. Drivers may still
+fuse other multiply-add pairs differently in the two shaders (compilers decide from the
+shape of the surrounding code, which the ubershader's branches change), mostly in
+lighting. Depth is a single expression in both and comes out bit-identical; a color can
+differ by one 8-bit step on a pixel, scaled by later combiner stages.
+
+One case is undefined in both shaders and cannot be made to match: a procedural texture
+with a mipmap filter takes its level of detail from screen-space derivatives, and Vulkan
+leaves those undefined next to pixels that the scissor test has already discarded. The two
+shaders can then differ along the edge of the scissor box.
+
+## How it is checked
+
+`claudhar-ubershader-check` (run by CI on Mesa's lavapipe) renders random fragment
+configurations, built field by field so every feature and invalid value Azahar tolerates
+occurs, with the specialized shader and with the ubershader, and compares color, depth and
+shadow maps. Each test passes when depth matches exactly wherever both shaders drew and at
+most 2% of the pixels differ by more than one step or are discarded by only one shader
+(an alpha test deciding the other way on a rounded alpha). `--minimize` reduces a failing
+configuration to the fewest features that still fail.
+
+Host result (lavapipe, LLVM 20; 2026-10-28): 8,000 random configurations, 4,000 through
+each generator, all pass; 7,989 are pixel-identical, and the largest color difference is 4
+steps, on one test. The run under the Khronos validation layers reports no errors.
+
+These are host results. They do not show the Thor's driver behaves the same, how fast the
+ubershader is in real games, or that cold first runs no longer pause; that is the device
+test below.
+
+## Device test
+
+Cold first run of the Luigi's Mansion: Dark Moon opening (File 1 reset, the title's shader
+cache deleted) on the Thor, against stock Azahar on the same settings:
+
+- no visible shader hitches;
+- `compile_waits 0` and `skipped 0` in the log;
+- the log's ubershader and fallback counts, and speed through the opening.

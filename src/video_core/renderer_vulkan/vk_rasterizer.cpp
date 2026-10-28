@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include "common/alignment.h"
 #include "common/literals.h"
@@ -73,8 +74,9 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
       texture_buffer{instance, scheduler, vk::BufferUsageFlagBits::eUniformTexelBuffer,
                      TextureBufferSize(instance)},
       texture_lf_buffer{instance, scheduler, vk::BufferUsageFlagBits::eUniformTexelBuffer,
-                        TextureBufferSize(instance)},
-      async_shaders{Settings::values.async_shader_compilation.GetValue()} {
+                        TextureBufferSize(instance)} {
+    // Claudhar: async_shaders (Settings::values.async_shader_compilation) chose between
+    // waiting for compiles and skipping draws. Neither happens now, so it is not read.
 
     vertex_buffers.fill(stream_buffer.Handle());
 
@@ -84,10 +86,14 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
         Common::AlignUp<u32>(sizeof(VSPicaUniformData), uniform_buffer_alignment);
     uniform_size_aligned_vs = Common::AlignUp<u32>(sizeof(VSUniformData), uniform_buffer_alignment);
     uniform_size_aligned_fs = Common::AlignUp<u32>(sizeof(FSUniformData), uniform_buffer_alignment);
+    uniform_size_aligned_uber =
+        Common::AlignUp<u32>(sizeof(Claudhar::Shading::UberConfig), uniform_buffer_alignment);
 
     // Define vertex layout for software shaders
     MakeSoftwareVertexLayout();
     pipeline_info.state.vertex_layout = software_layout;
+    // Claudhar: the ubershader pipelines are prepared for this layout.
+    pipeline_cache.SetSoftwareVertexLayout(software_layout);
 
     const vk::Device device = instance.GetDevice();
     texture_lf_view = device.createBufferViewUnique({
@@ -116,6 +122,9 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
     update_queue.AddBuffer(buffer_set, 0, uniform_buffer.Handle(), 0, sizeof(VSPicaUniformData));
     update_queue.AddBuffer(buffer_set, 1, uniform_buffer.Handle(), 0, sizeof(VSUniformData));
     update_queue.AddBuffer(buffer_set, 2, uniform_buffer.Handle(), 0, sizeof(FSUniformData));
+    // Claudhar: the ubershader's configuration.
+    update_queue.AddBuffer(buffer_set, Claudhar::Shading::UBER_CONFIG_BINDING,
+                           uniform_buffer.Handle(), 0, sizeof(Claudhar::Shading::UberConfig));
     update_queue.AddTexelBuffer(buffer_set, 3, *texture_lf_view);
     update_queue.AddTexelBuffer(buffer_set, 4, *texture_rg_view);
     update_queue.AddTexelBuffer(buffer_set, 5, *texture_rgba_view);
@@ -142,6 +151,8 @@ RasterizerVulkan::~RasterizerVulkan() = default;
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     res_cache.TickFrame();
+    // Claudhar: a summary of the draw counters every few seconds.
+    pipeline_cache.Ledger().LogPeriodically();
 }
 
 void RasterizerVulkan::LoadDefaultDiskResources(
@@ -448,6 +459,7 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     vertex_info = AnalyzeVertexArray(is_indexed, instance.GetMinVertexStrideAlignment());
     if (vertex_info.Invalid()) {
         // Do not draw anything if the vertex array is invalid.
+        ++pipeline_cache.Ledger().invalid; // Claudhar: counted, not silently dropped.
         return true;
     }
     SetupVertexArray();
@@ -467,10 +479,9 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         SetupIndexArray();
     }
 
-    const bool wait_built = !async_shaders || regs.pipeline.num_vertices <= 6;
-    if (!pipeline_cache.BindPipeline(pipeline_info, wait_built)) {
-        return true;
-    }
+    // Claudhar: the pipeline was chosen in Draw and is built. This used to wait for the
+    // compile or, with asynchronous shaders, skip the draw.
+    pipeline_cache.BindPipeline(pipeline_info);
 
     const DrawParams params = {
         .vertex_count = regs.pipeline.num_vertices,
@@ -526,6 +537,9 @@ void RasterizerVulkan::SetupIndexArray() {
 
 void RasterizerVulkan::DrawTriangles() {
     if (vertex_batch.empty()) {
+        // Claudhar: every triangle was clipped or culled, or the draw had no vertices.
+        ++pipeline_cache.Ledger().empty;
+        cpu_vertex_retry = false;
         return;
     }
 
@@ -557,11 +571,25 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     const auto fb_helper = res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
     const Framebuffer* framebuffer = fb_helper.Framebuffer();
     if (!framebuffer->Handle()) {
+        ++pipeline_cache.Ledger().empty; // Claudhar: no render target to draw into.
+        cpu_vertex_retry = false;
         return true;
     }
 
     pipeline_info.state.attachments.color = framebuffer->Format(SurfaceType::Color);
     pipeline_info.state.attachments.depth = framebuffer->Format(SurfaceType::Depth);
+
+    // Claudhar: choose the pipeline now, before anything is uploaded, so a GPU-vertex draw
+    // whose pipeline is not built can return and be shaded on the CPU instead. The CPU retry
+    // of such a draw only needs the ubershader; it does not queue a pipeline of its own.
+    pipeline_cache.UseFragmentShader(regs, user_config);
+    const FragmentPath path =
+        pipeline_cache.SelectPipeline(pipeline_info, accelerate, !cpu_vertex_retry);
+    cpu_vertex_retry = path == FragmentPath::CpuVertices;
+    if (cpu_vertex_retry) {
+        return false;
+    }
+    uber_config_dirty |= pipeline_cache.TakeUberConfig(uber_config);
 
     // Update scissor uniforms
     const auto [scissor_x1, scissor_y2, scissor_x2, scissor_y1] = fb_helper.Scissor();
@@ -578,9 +606,6 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Sync and bind the texture surfaces
     SyncTextureUnits(framebuffer);
     SyncUtilityTextures(framebuffer);
-
-    // Sync and bind the shader
-    pipeline_cache.UseFragmentShader(regs, user_config);
 
     // Sync the LUTs within the texture buffer
     SyncAndUploadLUTs();
@@ -601,12 +626,20 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     };
     pipeline_info.dynamic_info.scissor = draw_rect;
 
+    // Claudhar: count the draw under the path that shades it.
+    auto& ledger = pipeline_cache.Ledger();
+    if (path == FragmentPath::Ubershader) {
+        ++ledger.ubershader;
+    } else {
+        ++(accelerate ? ledger.specialized_gpu_vertices : ledger.specialized_cpu_vertices);
+    }
+
     // Draw the vertex batch
     bool succeeded = true;
     if (accelerate) {
         succeeded = AccelerateDrawBatchInternal(is_indexed);
     } else {
-        pipeline_cache.BindPipeline(pipeline_info, true);
+        pipeline_cache.BindPipeline(pipeline_info); // Claudhar: no longer waits for a compile.
 
         const u32 vertex_count = static_cast<u32>(vertex_batch.size());
         const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
@@ -985,12 +1018,13 @@ void RasterizerVulkan::SyncAndUploadLUTs() {
 
 void RasterizerVulkan::UploadUniforms(bool accelerate_draw) {
     const bool sync_vs_pica = accelerate_draw && pica.vs_setup.uniforms_dirty;
-    if (!sync_vs_pica && !vs_data_dirty && !fs_data_dirty) {
+    if (!sync_vs_pica && !vs_data_dirty && !fs_data_dirty && !uber_config_dirty) {
         return;
     }
 
-    const u32 uniform_size =
-        uniform_size_aligned_vs_pica + uniform_size_aligned_vs + uniform_size_aligned_fs;
+    // Claudhar: room for the ubershader configuration too.
+    const u32 uniform_size = uniform_size_aligned_vs_pica + uniform_size_aligned_vs +
+                             uniform_size_aligned_fs + uniform_size_aligned_uber;
     auto [uniforms, offset, invalidate] =
         uniform_buffer.Map(uniform_size, uniform_buffer_alignment);
 
@@ -1008,6 +1042,14 @@ void RasterizerVulkan::UploadUniforms(bool accelerate_draw) {
         pipeline_cache.UpdateRange(2, offset + used_bytes);
         fs_data_dirty = false;
         used_bytes += uniform_size_aligned_fs;
+    }
+
+    // Claudhar: the ubershader configuration of the current draw, when it changed.
+    if (uber_config_dirty || invalidate) {
+        std::memcpy(uniforms + used_bytes, &uber_config, sizeof(uber_config));
+        pipeline_cache.UpdateRange(PipelineCache::UberConfigOffsetSlot, offset + used_bytes);
+        uber_config_dirty = false;
+        used_bytes += uniform_size_aligned_uber;
     }
 
     if (sync_vs_pica || invalidate) {

@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -20,8 +21,10 @@ struct AsyncHandle {
 public:
     AsyncHandle(bool is_done_ = false) : is_done{is_done_} {}
 
+    // Claudhar: acquire, so a thread that sees the work done also sees what the work wrote
+    // (a pipeline or module handle). Relaxed allowed a stale handle on ARM.
     [[nodiscard]] bool IsDone() noexcept {
-        return is_done.load(std::memory_order::relaxed);
+        return is_done.load(std::memory_order::acquire);
     }
 
     void WaitDone() noexcept {
@@ -318,7 +321,16 @@ public:
                               Common::ThreadWorker* worker);
     ~GraphicsPipeline();
 
-    bool TryBuild(bool wait_built);
+    // Claudhar: TryBuild(wait_built) either waited for a compile or let the caller skip the
+    // draw. It is replaced by two calls that do neither, so no draw waits or is dropped.
+
+    /// Creates the pipeline now if the driver can do it without compiling (from the
+    /// pipeline cache). Returns true when the pipeline is ready. Emulation thread only.
+    bool TryBuildCached();
+
+    /// Queues the pipeline to be built on a worker thread, once; `building` counts queued
+    /// builds that have not finished. Emulation thread only.
+    void BuildInBackground(std::atomic<u32>& building);
 
     bool Build(bool fail_on_compile_required = false);
 

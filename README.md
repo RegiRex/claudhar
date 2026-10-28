@@ -8,10 +8,11 @@ multi-core CPUs, with zero draw skipping and zero shader compilation pauses.**
 [Rebuild plan](docs/PLAN.md)
 
 > [!WARNING]
-> Claudhar is starting **Phase 1**: today it is Azahar 2126.2 with a new name, its
-> own app ID, a device probe and a crash reporter. Zero-pause shading comes next; the
-> multi-core core and the new renderer follow. Do not expect it to run games better
-> than Azahar yet.
+> Claudhar is in **Phase 1**: Azahar 2126.2 with zero-pause shading in its Vulkan
+> renderer, a device probe and a crash reporter. A fragment ubershader draws whenever a
+> shader is still compiling, so cold first runs should not pause or skip draws; this is
+> still being tested on devices. The multi-core core and the new renderer come later.
+> See [Phase 1](docs/PHASE1_UBERSHADER.md).
 
 ## Goals
 
@@ -61,6 +62,20 @@ with the game exactly as Azahar does.
 
 If a run warns about a new signing key, uninstall the previous Claudhar build
 before installing the new one.
+
+## Checking the no-pause rules
+
+While a game runs, the log (Options → Share log) gets a line every few seconds:
+
+```
+Claudhar shading: drawn ... (specialized GPU-vertex ..., specialized CPU-vertex ...,
+ubershader ...), empty ..., invalid ..., CPU-vertex fallbacks ..., pipelines building ...,
+compile_waits 0, skipped 0
+```
+
+`compile_waits` and `skipped` must stay 0. Anything else is a bug worth reporting with
+the log. The first launch of a game spends a moment on the loading screen preparing the
+ubershader; later launches reuse it.
 
 ## Device probe
 

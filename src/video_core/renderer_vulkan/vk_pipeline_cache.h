@@ -1,10 +1,15 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
 #include <bitset>
+#include <optional>
+
+#include "claudhar/shading/draw_ledger.h"
+#include "claudhar/shading/fs_ubershader.h"
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -32,15 +37,27 @@ enum class DescriptorHeapType : u32 {
     Utility,
 };
 
+/// Claudhar: how the next draw's fragments are shaded, chosen without waiting for a compile.
+enum class FragmentPath : u8 {
+    Specialized, ///< Azahar's pipeline for this configuration is built.
+    Ubershader,  ///< It is not built yet; the ubershader draws (CPU-shaded vertices only).
+    CpuVertices, ///< A GPU-vertex draw whose pipeline is not built: shade vertices on the CPU.
+};
+
 /**
  * Stores a collection of rasterizer pipelines used during rendering.
  */
 class PipelineCache {
     static constexpr u32 NumRasterizerSets = 3;
     static constexpr u32 NumDescriptorHeaps = 3;
-    static constexpr u32 NumDynamicOffsets = 3;
+    // Claudhar: a fourth dynamic uniform buffer holds the ubershader's configuration.
+    static constexpr u32 NumDynamicOffsets = 4;
 
 public:
+    /// Claudhar: the dynamic offset slot of the ubershader configuration buffer (binding 6;
+    /// slots follow the order of the dynamic bindings 0, 1, 2 and 6).
+    static constexpr u8 UberConfigOffsetSlot = 3;
+
     explicit PipelineCache(const Instance& instance, Scheduler& scheduler,
                            RenderManager& renderpass_cache, DescriptorUpdateQueue& update_queue);
     ~PipelineCache();
@@ -66,8 +83,32 @@ public:
     void SwitchCache(u64 title_id, const std::atomic_bool& stop_loading = std::atomic_bool{false},
                      const VideoCore::DiskResourceLoadCallback& callback = {});
 
-    /// Binds a pipeline using the provided information
-    bool BindPipeline(PipelineInfo& info, bool wait_built = false);
+    // Claudhar: BindPipeline(info, wait_built) waited for a compile or reported a skipped
+    // draw. Choosing and binding are now separate so the choice, which never waits, is
+    // known before the uniforms are uploaded.
+
+    /// Chooses the pipeline for the next draw from the current shaders and `info`. GPU-vertex
+    /// draws use only specialized pipelines; CPU-vertex draws fall back to the ubershader.
+    /// `specialize` false skips building a specialized pipeline, for the CPU-vertex retry of
+    /// a GPU-vertex draw. Emulation thread only.
+    FragmentPath SelectPipeline(PipelineInfo& info, bool gpu_vertices, bool specialize);
+
+    /// Records binding the pipeline chosen by SelectPipeline, with the dynamic state.
+    void BindPipeline(PipelineInfo& info);
+
+    /// When the ubershader was chosen for a configuration other than the last one taken,
+    /// fills `out` with its configuration buffer and returns true.
+    bool TakeUberConfig(Claudhar::Shading::UberConfig& out);
+
+    /// The software vertex layout, used to build ubershader pipelines before play.
+    void SetSoftwareVertexLayout(const VertexLayout& layout) {
+        software_layout = layout;
+    }
+
+    /// The draw counters, which the rasterizer also updates.
+    Claudhar::Shading::DrawLedger& Ledger() {
+        return ledger;
+    }
 
     Pica::Shader::Generator::ExtraVSConfig CalcExtraConfig(
         const Pica::Shader::Generator::PicaVSConfig& config);
@@ -137,6 +178,19 @@ private:
     /// Returns the transferable shader dir
     std::string GetTransferableDir() const;
 
+    /// Claudhar: compiles every ubershader variant and creates its pipelines for each render
+    /// target format, on all cores, while the game loads. Runs once per renderer.
+    void PrepareUbershaders(const std::atomic_bool& stop_loading,
+                            const VideoCore::DiskResourceLoadCallback& callback);
+
+    /// Claudhar: the ubershader pipeline for `info` and the current fragment configuration.
+    GraphicsPipeline* UberPipeline(const PipelineInfo& info);
+
+    /// Claudhar: loads and saves the ubershader pipelines' own driver cache. It is kept
+    /// apart from the per-game cache so it survives switching games and applets.
+    void LoadUberPipelineCache();
+    void SaveUberPipelineCache();
+
 private:
     const Instance& instance;
     Scheduler& scheduler;
@@ -163,6 +217,20 @@ private:
     u64 current_program_id{0};
     std::vector<std::shared_ptr<ShaderDiskCache>> disk_caches;
     std::shared_ptr<ShaderDiskCache> curr_disk_cache{};
+
+    // Claudhar: zero-pause shading state.
+    Claudhar::Shading::DrawLedger ledger;
+    std::optional<Pica::Shader::FSConfig> fs_config; ///< Of the current draw, before ApplyProfile.
+    Pica::Shader::UserConfig fs_user{};
+    std::optional<Pica::Shader::FSConfig> taken_uber_config; ///< Last one TakeUberConfig gave.
+    GraphicsPipeline* selected_pipeline{};
+    bool uber_selected{};
+    VertexLayout software_layout{};
+    std::array<std::unique_ptr<Shader>, Claudhar::Shading::UberKey::NUM_VARIANTS> uber_shaders;
+    tsl::robin_map<u64, std::unique_ptr<GraphicsPipeline>, Common::IdentityHash<u64>>
+        uber_pipelines;
+    vk::UniquePipelineCache uber_pipeline_cache;
+    std::string uber_pipeline_cache_path;
 };
 
 } // namespace Vulkan

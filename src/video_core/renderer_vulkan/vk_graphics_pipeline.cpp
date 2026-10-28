@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <boost/container/static_vector.hpp>
 
@@ -81,29 +82,29 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance_, RenderManager& ren
 
 GraphicsPipeline::~GraphicsPipeline() = default;
 
-bool GraphicsPipeline::TryBuild(bool wait_built) {
-    // The pipeline is currently being compiled. We can either wait for it
-    // or skip the draw.
+// Claudhar: replaces TryBuild; see the header.
+bool GraphicsPipeline::TryBuildCached() {
+    // A queued build owns the pipeline until it finishes.
     if (is_pending) {
-        return wait_built;
-    }
-
-    // If the shaders haven't been compiled yet, we cannot proceed.
-    const bool shaders_pending = std::any_of(
-        stages.begin(), stages.end(), [](Shader* shader) { return shader && !shader->IsDone(); });
-    if (!wait_built && shaders_pending) {
         return false;
     }
+    const bool shaders_pending = std::any_of(
+        stages.begin(), stages.end(), [](Shader* shader) { return shader && !shader->IsDone(); });
+    // Ask the driver if it can give us the pipeline without compiling.
+    return !shaders_pending && instance.IsPipelineCreationCacheControlSupported() && Build(true);
+}
 
-    // Ask the driver if it can give us the pipeline quickly.
-    if (!shaders_pending && instance.IsPipelineCreationCacheControlSupported() && Build(true)) {
-        return true;
+// Claudhar: replaces TryBuild; see the header. The worker waits for the shaders itself.
+void GraphicsPipeline::BuildInBackground(std::atomic<u32>& building) {
+    if (is_pending) {
+        return;
     }
-
-    // Fallback to (a)synchronous compilation
-    worker->QueueWork([this] { Build(); });
     is_pending = true;
-    return wait_built;
+    building.fetch_add(1, std::memory_order_relaxed);
+    worker->QueueWork([this, &building] {
+        Build();
+        building.fetch_sub(1, std::memory_order_relaxed);
+    });
 }
 
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {

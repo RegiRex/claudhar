@@ -1,6 +1,7 @@
 // Copyright 2022-2025 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -140,7 +141,13 @@ private:
     u32 uniform_size_aligned_vs_pica;
     u32 uniform_size_aligned_vs;
     u32 uniform_size_aligned_fs;
-    bool async_shaders{false};
+    // Claudhar: async_shaders is gone; see the constructor.
+    u32 uniform_size_aligned_uber;
+    Claudhar::Shading::UberConfig uber_config{}; ///< Last ubershader configuration uploaded.
+    bool uber_config_dirty{};
+    /// The current draw is the CPU-vertex retry of a GPU-vertex draw whose pipeline was not
+    /// built; set by Draw, cleared when that retry is drawn.
+    bool cpu_vertex_retry{};
 };
 
 } // namespace Vulkan

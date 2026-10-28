@@ -1,6 +1,7 @@
 // Copyright 2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include "common/common_paths.h"
 #include "common/file_util.h"
@@ -146,10 +147,11 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
     return std::make_pair(config_hash, shader);
 }
 
+// Claudhar: takes the configuration the pipeline cache already built from the registers,
+// which it also needs for the ubershader, instead of building it a second time.
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
-    const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user) {
+    const FSConfig& fs_config, const Pica::Shader::UserConfig& user) {
 
-    const FSConfig fs_config{regs};
     const auto fs_config_hash = fs_config.Hash();
     const auto [it, new_shader] = fragment_shaders.try_emplace(fs_config_hash, parent.instance);
     auto& shader = it->second;
@@ -1456,7 +1458,11 @@ bool ShaderDiskCache::InitPLCache(const std::atomic_bool& stop_loading,
                 parent.instance, parent.renderpass_cache, info, *parent.driver_pipeline_cache,
                 *parent.pipeline_layout, shaders, &parent.pipeline_workers);
 
-            it_pl.value()->TryBuild(false);
+            // Claudhar: a pipeline the driver cannot create from its cache is compiled in
+            // the background; the ubershader draws until it is ready.
+            if (!it_pl.value()->TryBuildCached()) {
+                it_pl.value()->BuildInBackground(parent.ledger.building);
+            }
 
             LOG_DEBUG(Render_Vulkan, "    built.");
 
