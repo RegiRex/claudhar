@@ -1,6 +1,7 @@
 // Copyright 2023 Citra Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -34,6 +35,18 @@ vk::UniqueInstance CreateInstance(const Common::DynamicLibrary& library,
                                   bool dump_command_buffers);
 
 DebugCallback CreateDebugCallback(vk::Instance instance, bool& debug_utils_supported);
+
+// Claudhar: fill a dispatcher other than the renderer's (the device probe's) with the same
+// code the renderer uses. DispatchLoaderDynamic::init is an inline function whose body
+// depends on the VK_USE_PLATFORM_* macros of the file that calls it. Calling it from a file
+// with different macros adds a second, different definition, and the linker may keep that
+// one for the renderer too: the probe's copy, without the Android surface function, made
+// every game crash in CreateSurface. These helpers keep each init call in the same file as
+// the renderer's own call, so only one definition exists. Use them instead of init().
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch,
+                    PFN_vkGetInstanceProcAddr get_instance_proc_addr);
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch, vk::Instance instance);
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch, vk::Device device);
 
 template <typename T>
 concept VulkanHandleType = vk::isVulkanHandleType<T>::value;

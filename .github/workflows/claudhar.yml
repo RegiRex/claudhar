@@ -62,6 +62,9 @@ jobs:
         run: ninja -C build
       - name: Run C++ tests
         run: ctest --test-dir build --output-on-failure -j4
+      # A second definition of vulkan-hpp's dispatcher init once crashed every game.
+      - name: Check Vulkan dispatcher definitions
+        run: python3 tools/claudhar/check_vulkan_dispatch.py build
       - name: Save compiler cache
         if: always()
         uses: actions/cache/save@v5

@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <span>
 #include <boost/container/static_vector.hpp>
@@ -699,6 +700,11 @@ void Instance::CollectToolingInfo() {
         has_renderdoc = has_renderdoc || name == "RenderDoc";
         has_nsight_graphics = has_nsight_graphics || name == "NVIDIA Nsight Graphics";
     }
+}
+
+// Claudhar: compiled here, next to the renderer's own device init call; see vk_platform.h.
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch, vk::Device device) {
+    dispatch.init(device);
 }
 
 } // namespace Vulkan

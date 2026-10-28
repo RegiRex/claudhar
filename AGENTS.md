@@ -40,6 +40,9 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
   per-pixel virtual calls or logging in hot loops.
 - Format C++ with the repository's `.clang-format` and Kotlin with ktlint; no
   trailing whitespace.
+- Fill a Vulkan dispatcher only through `Vulkan::InitDispatcher`, never with
+  `DispatchLoaderDynamic::init` outside Azahar's Vulkan setup files: a second, different
+  definition of that inline function once crashed every game. CI checks this.
 
 ## Licensing (GPL-3.0-or-later, following Azahar)
 

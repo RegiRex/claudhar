@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 // Include the vulkan platform specific header
 #if defined(ANDROID)
@@ -436,6 +437,17 @@ DebugCallback CreateDebugCallback(vk::Instance instance, bool& debug_utils_suppo
     }
     // Otherwise fallback to debug report callback.
     return CreateDebugReportCallback(instance);
+}
+
+// Claudhar: compiled here, with this file's platform macros, like the renderer's own
+// init calls above; see vk_platform.h.
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch,
+                    PFN_vkGetInstanceProcAddr get_instance_proc_addr) {
+    dispatch.init(get_instance_proc_addr);
+}
+
+void InitDispatcher(vk::detail::DispatchLoaderDynamic& dispatch, vk::Instance instance) {
+    dispatch.init(instance);
 }
 
 } // namespace Vulkan

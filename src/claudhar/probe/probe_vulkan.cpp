@@ -34,12 +34,16 @@
 #include "common/common_types.h"
 #include "common/dynamic_library/dynamic_library.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Claudhar::Probe {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+// The probe's own function table. It is filled only through Vulkan::InitDispatcher, never
+// with Dispatch::init here, so this file adds no second definition of that inline
+// function (see vk_platform.h for why that crashed every game).
 using Dispatch = vk::detail::DispatchLoaderDynamic;
 
 constexpr vk::Format ColorFormat = vk::Format::eR8G8B8A8Unorm;
@@ -833,13 +837,13 @@ void CreateDevice(Context& c, std::string& out) {
     const auto get_proc = c.library.GetSymbol<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
     if (!get_proc)
         throw std::runtime_error("no vkGetInstanceProcAddr");
-    c.d.init(get_proc);
+    Vulkan::InitDispatcher(c.d, get_proc);
     const u32 loader =
         c.d.vkEnumerateInstanceVersion ? vk::enumerateInstanceVersion(c.d) : VK_API_VERSION_1_0;
     const vk::ApplicationInfo app{.pApplicationName = "Claudhar probe",
                                   .apiVersion = std::min(loader, VK_API_VERSION_1_3)};
     c.instance = vk::createInstance({.pApplicationInfo = &app}, nullptr, c.d);
-    c.d.init(c.instance);
+    Vulkan::InitDispatcher(c.d, c.instance);
     out +=
         fmt::format("loader: {} (system driver; custom drivers are not probed)\n", Version(loader));
 
@@ -1017,7 +1021,7 @@ void CreateDevice(Context& c, std::string& out) {
                                    .enabledExtensionCount = static_cast<u32>(enabled.size()),
                                    .ppEnabledExtensionNames = enabled.data()},
                                   nullptr, c.d);
-    c.d.init(c.device);
+    Vulkan::InitDispatcher(c.d, c.device);
     c.queue = c.device.getQueue(c.queue_family, 0, c.d);
 }
 
