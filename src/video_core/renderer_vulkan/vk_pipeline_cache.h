@@ -40,8 +40,8 @@ enum class DescriptorHeapType : u32 {
 /// Claudhar: how the next draw's fragments are shaded, chosen without waiting for a compile.
 enum class FragmentPath : u8 {
     Specialized, ///< Azahar's pipeline for this configuration is built.
-    Ubershader,  ///< It is not built yet; the ubershader draws (CPU-shaded vertices only).
-    CpuVertices, ///< A GPU-vertex draw whose pipeline is not built: shade vertices on the CPU.
+    Ubershader,  ///< It is not built yet; the ubershader draws.
+    CpuVertices, ///< A GPU-vertex draw with no pipeline built yet: shade vertices on the CPU.
 };
 
 /**
@@ -87,10 +87,11 @@ public:
     // draw. Choosing and binding are now separate so the choice, which never waits, is
     // known before the uniforms are uploaded.
 
-    /// Chooses the pipeline for the next draw from the current shaders and `info`. GPU-vertex
-    /// draws use only specialized pipelines; CPU-vertex draws fall back to the ubershader.
-    /// `specialize` false skips building a specialized pipeline, for the CPU-vertex retry of
-    /// a GPU-vertex draw. Emulation thread only.
+    /// Chooses the pipeline for the next draw from the current shaders and `info`: the
+    /// specialized one when it is built, otherwise the fragment ubershader. A GPU-vertex draw
+    /// uses the ubershader with its own vertex shader once that pipeline is built, and is
+    /// returned to the CPU until then. `specialize` false skips building a specialized
+    /// pipeline, for the CPU-vertex retry of a GPU-vertex draw. Emulation thread only.
     FragmentPath SelectPipeline(PipelineInfo& info, bool gpu_vertices, bool specialize);
 
     /// Records binding the pipeline chosen by SelectPipeline, with the dynamic state.
@@ -186,6 +187,13 @@ private:
     /// Claudhar: the ubershader pipeline for `info` and the current fragment configuration.
     GraphicsPipeline* UberPipeline(const PipelineInfo& info);
 
+    /// Claudhar: the pipeline with the current vertex shader and the fragment ubershader
+    /// for a GPU-vertex draw, or null while it is being built.
+    GraphicsPipeline* GpuVertexUberPipeline(const PipelineInfo& info);
+
+    /// Claudhar: TryBuildCached, timed for the ledger, since it runs on the emulation thread.
+    bool TryBuildCached(GraphicsPipeline* pipeline);
+
     /// Claudhar: loads and saves the ubershader pipelines' own driver cache. It is kept
     /// apart from the per-game cache so it survives switching games and applets.
     void LoadUberPipelineCache();
@@ -203,6 +211,9 @@ private:
     std::size_t num_worker_threads;
     Common::ThreadWorker pipeline_workers;
     Common::ThreadWorker shader_workers;
+    /// Claudhar: builds GPU-vertex ubershader pipelines, which take GPU-vertex draws off the
+    /// CPU, apart from the specialized ones so they are not queued behind them.
+    Common::ThreadWorker uber_workers;
     PipelineInfo current_info{};
     GraphicsPipeline* current_pipeline{};
     std::array<DescriptorHeap, NumDescriptorHeaps> descriptor_heaps;

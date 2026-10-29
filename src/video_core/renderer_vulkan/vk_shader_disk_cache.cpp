@@ -271,6 +271,27 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
     return it.value().get();
 }
 
+// Claudhar: see the header.
+GraphicsPipeline* ShaderDiskCache::GetGpuVertexUberPipeline(const PipelineInfo& info,
+                                                            Shader* ubershader,
+                                                            Common::ThreadWorker* worker) {
+    auto [it, new_pipeline] =
+        gpu_vertex_uber_pipelines.try_emplace(info.state.OptimizedHash(parent.instance));
+    if (new_pipeline) {
+        auto stages = parent.current_shaders;
+        stages[ProgramType::FS] = ubershader;
+        // As in GetPipeline: without geometry shaders the stage is left out.
+        if (!parent.instance.UseGeometryShaders() ||
+            parent.instance.IsFragmentShaderBarycentricSupported()) {
+            stages[ProgramType::GS] = nullptr;
+        }
+        it.value() = std::make_unique<GraphicsPipeline>(parent.instance, parent.renderpass_cache,
+                                                        info, *parent.driver_pipeline_cache,
+                                                        *parent.pipeline_layout, stages, worker);
+    }
+    return it.value().get();
+}
+
 ShaderDiskCache::SourceFileCacheVersionHash ShaderDiskCache::GetSourceFileCacheVersionHash() {
     SourceFileCacheVersionHash hash{};
     const std::size_t length = std::min(std::strlen(Common::g_shader_cache_version), hash.size());

@@ -151,7 +151,8 @@ RasterizerVulkan::~RasterizerVulkan() = default;
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     res_cache.TickFrame();
-    // Claudhar: a summary of the draw counters every few seconds.
+    // Claudhar: a summary of the draw counters and timings every few seconds.
+    pipeline_cache.Ledger().CountFrame();
     pipeline_cache.Ledger().LogPeriodically();
 }
 
@@ -474,9 +475,12 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     }
 
     // Claudhar: an accepted draw is requested here; one returned to the CPU path is
-    // requested again by DrawTriangles.
+    // requested again by DrawTriangles, which also times its CPU vertex shading.
     const bool accepted = Draw(true, is_indexed);
     pipeline_cache.Ledger().requested += accepted;
+    if (!accepted) {
+        cpu_vertex_start = Claudhar::Shading::DrawLedger::Clock::now();
+    }
     return accepted;
 }
 
@@ -542,7 +546,12 @@ void RasterizerVulkan::SetupIndexArray() {
 }
 
 void RasterizerVulkan::DrawTriangles() {
-    ++pipeline_cache.Ledger().requested; // Claudhar: see AccelerateDrawBatch.
+    // Claudhar: see AccelerateDrawBatch.
+    auto& ledger = pipeline_cache.Ledger();
+    ++ledger.requested;
+    if (cpu_vertex_retry) {
+        ledger.CountCpuVertexTime(Claudhar::Shading::DrawLedger::Clock::now() - cpu_vertex_start);
+    }
     if (vertex_batch.empty()) {
         // Claudhar: every triangle was clipped or culled, or the draw had no vertices.
         ++pipeline_cache.Ledger().empty;
@@ -636,7 +645,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Claudhar: count the draw under the path that shades it.
     auto& ledger = pipeline_cache.Ledger();
     if (path == FragmentPath::Ubershader) {
-        ++ledger.ubershader;
+        ++(accelerate ? ledger.ubershader_gpu_vertices : ledger.ubershader_cpu_vertices);
     } else {
         ++(accelerate ? ledger.specialized_gpu_vertices : ledger.specialized_cpu_vertices);
     }

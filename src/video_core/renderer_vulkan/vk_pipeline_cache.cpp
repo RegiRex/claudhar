@@ -98,8 +98,12 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     : instance{instance_}, scheduler{scheduler_}, renderpass_cache{renderpass_cache_},
       update_queue{update_queue_},
       num_worker_threads{std::max(std::thread::hardware_concurrency(), 2U) / 2},
-      pipeline_workers{num_worker_threads, "Pipeline workers"},
+      // Claudhar: specialized pipelines are only an optimization now, so their compiles yield
+      // to the emulation thread. Shader workers stay at normal priority: GPU-vertex
+      // ubershader pipelines wait for their vertex shaders.
+      pipeline_workers{num_worker_threads, "Pipeline workers", {}, Common::ThreadPriority::Low},
       shader_workers{num_worker_threads, "Shader workers"},
+      uber_workers{std::max<std::size_t>(num_worker_threads / 2, 1), "Claudhar ubershaders"},
       descriptor_heaps{
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), BUFFER_BINDINGS, 32},
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), TEXTURE_BINDINGS<1>},
@@ -158,6 +162,7 @@ void PipelineCache::BuildLayout() {
 }
 
 PipelineCache::~PipelineCache() {
+    uber_workers.WaitForRequests(); // Claudhar: these build pipelines too.
     pipeline_workers.WaitForRequests();
     shader_workers.WaitForRequests();
     SaveDriverPipelineDiskCache();
@@ -391,7 +396,7 @@ FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices
 
     if (specialize) {
         GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
-        if (pipeline->IsDone() || pipeline->TryBuildCached()) {
+        if (pipeline->IsDone() || TryBuildCached(pipeline)) {
             selected_pipeline = pipeline;
             uber_selected = false;
             return FragmentPath::Specialized;
@@ -399,15 +404,47 @@ FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices
         pipeline->BuildInBackground(ledger.building);
     }
 
-    // Only the CPU-vertex layout has ubershader pipelines; a GPU-vertex draw is shaded on
-    // the CPU instead until its own pipeline is built.
+    // A GPU-vertex draw keeps its own vertex shader and borrows the ubershader for its
+    // fragments. That pipeline is compiled once per vertex shader rather than per fragment
+    // configuration, so it is ready long before most specialized ones. Until it is, the
+    // draw's vertices are shaded on the CPU, which is much slower.
     if (gpu_vertices) {
+        if (GraphicsPipeline* const pipeline = GpuVertexUberPipeline(info)) {
+            selected_pipeline = pipeline;
+            uber_selected = true;
+            return FragmentPath::Ubershader;
+        }
         ++ledger.cpu_vertex_fallbacks;
         return FragmentPath::CpuVertices;
     }
     selected_pipeline = UberPipeline(info);
     uber_selected = true;
     return FragmentPath::Ubershader;
+}
+
+GraphicsPipeline* PipelineCache::GpuVertexUberPipeline(const PipelineInfo& info) {
+    const auto key = Claudhar::Shading::MakeUberKey(*fs_config, fs_user, profile);
+    Shader* const ubershader = uber_shaders[key.Index()].get();
+    if (!ubershader) {
+        // Only a custom-texture variant turned on after loading; the CPU retry compiles it.
+        return nullptr;
+    }
+    PipelineInfo uber_info = info;
+    uber_info.state.shader_ids[ProgramType::FS] = UberShaderId(key);
+    GraphicsPipeline* const pipeline =
+        curr_disk_cache->GetGpuVertexUberPipeline(uber_info, ubershader, &uber_workers);
+    if (pipeline->IsDone() || TryBuildCached(pipeline)) {
+        return pipeline;
+    }
+    pipeline->BuildInBackground(ledger.building_ubershaders);
+    return nullptr;
+}
+
+bool PipelineCache::TryBuildCached(GraphicsPipeline* pipeline) {
+    const auto start = std::chrono::steady_clock::now();
+    const bool built = pipeline->TryBuildCached();
+    ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start);
+    return built;
 }
 
 bool PipelineCache::TakeUberConfig(Claudhar::Shading::UberConfig& out) {
@@ -449,7 +486,7 @@ GraphicsPipeline* PipelineCache::UberPipeline(const PipelineInfo& info) {
             &pipeline_workers);
     }
     GraphicsPipeline* const pipeline = it.value().get();
-    if (!pipeline->IsDone() && !pipeline->TryBuildCached()) {
+    if (!pipeline->IsDone() && !TryBuildCached(pipeline)) {
         // The driver needed to compile for fixed state the preparation did not cover. The
         // first few are logged with that state so the preparation can include it.
         ++ledger.compile_waits;
@@ -463,7 +500,9 @@ GraphicsPipeline* PipelineCache::UberPipeline(const PipelineInfo& info) {
                         state.blending.blend_enable, state.blending.value,
                         state.blending.color_write_mask, state.blending.logic_op);
         }
+        const auto start = std::chrono::steady_clock::now();
         pipeline->Build();
+        ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start);
     }
     return pipeline;
 }

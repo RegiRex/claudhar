@@ -42,6 +42,12 @@ public:
 
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
 
+    /// Claudhar: the pipeline that draws `info` with the current vertex shader and the
+    /// fragment ubershader `ubershader`, created on first use and built by
+    /// `worker`. It lives here because it uses this title's vertex shaders and driver cache.
+    GraphicsPipeline* GetGpuVertexUberPipeline(const PipelineInfo& info, Shader* ubershader,
+                                               Common::ThreadWorker* worker);
+
     u64 GetProgramID() const {
         return title_id;
     }
@@ -359,6 +365,11 @@ private:
     tsl::robin_map<u64, std::unique_ptr<GraphicsPipeline>, Common::IdentityHash<u64>>
         graphics_pipelines;
     std::unordered_set<u64> known_graphic_pipelines;
+
+    // Claudhar: see GetGpuVertexUberPipeline. Not written to the disk cache: the driver
+    // cache keeps them, and they are cheap to create again from it.
+    tsl::robin_map<u64, std::unique_ptr<GraphicsPipeline>, Common::IdentityHash<u64>>
+        gpu_vertex_uber_pipelines;
 };
 
 } // namespace Vulkan

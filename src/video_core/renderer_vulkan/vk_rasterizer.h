@@ -148,6 +148,8 @@ private:
     /// The current draw is the CPU-vertex retry of a GPU-vertex draw whose pipeline was not
     /// built; set by Draw, cleared when that retry is drawn.
     bool cpu_vertex_retry{};
+    /// When that retry's vertex shading on the CPU began.
+    Claudhar::Shading::DrawLedger::Clock::time_point cpu_vertex_start{};
 };
 
 } // namespace Vulkan
