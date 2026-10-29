@@ -76,3 +76,9 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
   stock Azahar on the same device and settings.
 - Report host tests, CI results and device results separately. A green build or a
   passing host test does not show that a game runs faster or correctly.
+- Device runs use turbo (no speed limit), so a log shows the highest speed a game
+  reaches and how far it falls when something gets expensive. Analyze turbo intervals;
+  do not exclude them. Judge a change by both numbers. A fall from 300% to 200% still
+  plays at full speed and can be expected in demanding scenes. A fall to around 30%,
+  from turbo or from 100%, is a failure. A fall that large under turbo points at
+  Claudhar's own processing rather than at the scene's demand.
