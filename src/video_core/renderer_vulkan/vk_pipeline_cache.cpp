@@ -363,6 +363,19 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
     bool new_applet = is_applet(disk_caches[new_pos]->GetProgramID());
     curr_disk_cache = disk_caches[new_pos];
 
+    // Claudhar: the caches erased below own shaders and pipelines that worker threads may
+    // still be compiling, and their jobs point into them. Let those jobs finish first. This
+    // runs while the system switches titles, not during play.
+    const bool erases = std::any_of(disk_caches.begin(), disk_caches.end(), [&](const auto& c) {
+        return c != disk_caches.front() && c != curr_disk_cache &&
+               (!new_applet || (prev_applet && is_applet(c->GetProgramID())));
+    });
+    if (erases) {
+        uber_workers.WaitForRequests();
+        pipeline_workers.WaitForRequests();
+        shader_workers.WaitForRequests();
+    }
+
     if (prev_applet) {
         // If we came from an applet, clean up all other applets
         for (auto it = disk_caches.begin(); it != disk_caches.end();) {
