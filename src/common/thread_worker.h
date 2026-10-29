@@ -1,6 +1,7 @@
 // Copyright 2020 yuzu Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -36,11 +37,17 @@ class StatefulThreadWorker {
         std::conditional_t<with_state, std::function<StateType(std::size_t)>, DummyCallable>;
 
 public:
+    // Claudhar: `priority` lets background work, such as compiling, yield to the
+    // emulation thread when they share a core.
     explicit StatefulThreadWorker(std::size_t num_workers, std::string_view name,
-                                  StateMaker func = {})
+                                  StateMaker func = {},
+                                  ThreadPriority priority = ThreadPriority::Normal)
         : workers_queued{num_workers}, thread_name{name} {
-        const auto lambda = [this, func](std::stop_token stop_token, std::size_t index) {
+        const auto lambda = [this, func, priority](std::stop_token stop_token, std::size_t index) {
             Common::SetCurrentThreadName(thread_name.data());
+            if (priority != ThreadPriority::Normal) {
+                Common::SetCurrentThreadPriority(priority);
+            }
             {
                 [[maybe_unused]] std::conditional_t<with_state, StateType, int> state{func(index)};
                 while (!stop_token.stop_requested()) {

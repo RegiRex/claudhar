@@ -1,6 +1,7 @@
 // Copyright 2013 Dolphin Emulator Project / 2014 Citra Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <string>
 
@@ -22,6 +23,9 @@
 #endif
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+#ifdef __linux__
+#include <sys/resource.h> // Claudhar: setpriority
 #endif
 
 #ifdef __FreeBSD__
@@ -61,6 +65,16 @@ void SetCurrentThreadPriority(ThreadPriority new_priority) {
 #else
 
 void SetCurrentThreadPriority(ThreadPriority new_priority) {
+#ifdef __linux__
+    // Claudhar: SCHED_OTHER has the single priority 0, so the code below changes nothing on
+    // Linux and Android. The nice value is what weighs threads against each other there, and
+    // Linux applies it to the calling thread only. Raising priority needs a privilege, so
+    // only Low (the nice value Android uses for background work) and Normal are applied.
+    if (new_priority <= ThreadPriority::Normal) {
+        setpriority(PRIO_PROCESS, 0, new_priority == ThreadPriority::Low ? 10 : 0);
+        return;
+    }
+#endif
     pthread_t this_thread = pthread_self();
 
     const auto scheduling_type = SCHED_OTHER;
