@@ -16,7 +16,7 @@ With them on, draws with more than six vertices are skipped until the pipeline i
 | Draw | Pipeline built | Pipeline not built yet |
 | --- | --- | --- |
 | Vertices shaded on the CPU | Azahar's specialized pipeline | The **fragment ubershader**; the specialized pipeline is compiled on a worker thread meanwhile |
-| Vertices shaded on the GPU (hardware shader setting) | Azahar's specialized pipeline | Shaded on the CPU instead, then drawn as in the row above; its pipeline is compiled meanwhile |
+| Vertices shaded on the GPU (hardware shader setting) | Azahar's specialized pipeline | The draw's own vertex shader with the **fragment ubershader**. That pipeline needs one compile per vertex shader, on workers of its own; until it is built, the vertices are shaded on the CPU and drawn as in the row above |
 
 The ubershader is one GLSL fragment shader that reads the fragment configuration from a
 uniform buffer (binding 6) instead of having it compiled in. A few configuration features
@@ -31,6 +31,15 @@ other fixed state (blending, write mask, logic op) are then created during play 
 0.2–0.4 ms on the Thor, from the cache, with no compile. If the driver ever refuses one,
 it is compiled at once and counted as a compile wait.
 
+GPU-vertex draws needed the extra row in 0.0.2-alpha. In 0.0.1-alpha they went to the CPU
+until their specialized pipeline was built, and on the Thor that was 97% of Dark Moon's
+first draws (see the device test below): Azahar's CPU vertex path, which Uberhar measured
+taking most of the frame in the same opening, cannot carry them. A specialized pipeline
+is needed for every fragment configuration a vertex shader is drawn with; the ubershader
+pipeline only once per vertex shader, and later fixed-state variants of it come from the
+driver cache. Specialized pipelines are compiled at low thread priority, so they give way
+to the emulation thread when both want the same core.
+
 Azahar's "asynchronous shader compilation" setting no longer has any effect on Vulkan; it
 chose between waiting and skipping, and neither happens now.
 
@@ -41,20 +50,33 @@ Code: `src/claudhar/shading/fs_ubershader.*` (generator and configuration buffer
 
 ## Counters
 
-Every few seconds the log has a line like
+Every 10 seconds the log has two lines like
 
 ```
 Claudhar shading: requested 120654, drawn 120344 (specialized GPU-vertex 101200, specialized
-CPU-vertex 15022, ubershader 4122), empty 310, invalid 0, CPU-vertex fallbacks 3890,
-pipelines building 0, compile_waits 0, skipped 0
+CPU-vertex 15022, ubershader GPU-vertex 3890, ubershader CPU-vertex 232), empty 310,
+invalid 0, CPU-vertex fallbacks 120, building: specialized 4, GPU-vertex ubershader 0,
+compile_waits 0, skipped 0
+Claudhar timing: 600 frames in 10.0 s, slowest 21 ms, 0 over 50 ms; CPU vertex shading of
+fallbacks 35 ms; pipelines created on the emulation thread 41 in 9.6 ms, slowest 0.4 ms
 ```
 
 `compile_waits` and `skipped` must be 0. Every draw the renderer is asked for is counted
 as requested and again by its outcome; `skipped` is the difference, so a draw dropped by
 any path shows up there. A compile wait also logs the pipeline state the driver could not
 create from its cache, so the preparation can be extended to cover it. `CPU-vertex
-fallbacks` counts GPU-vertex draws shaded on the CPU because their pipeline was still
-compiling; each is requested and drawn once, on the CPU.
+fallbacks` counts GPU-vertex draws shaded on the CPU because no pipeline for them was
+built yet; each is requested and drawn once, on the CPU. `building` counts the pipelines
+queued on worker threads and not finished.
+
+The timing line covers the same 10 seconds and shows what slows the game down without
+breaking a rule: frames (from one presented frame to the next; pausing the emulation shows
+as one long frame), the time the emulation thread spent shading fallback draws' vertices,
+and pipelines it created itself from the driver cache, which should each take well under a
+millisecond.
+
+The log file is flushed whenever its queue runs empty (0.0.2-alpha), so after a crash it
+ends where the game stopped. It used to be flushed only at errors.
 
 ## Matching Azahar's shaders
 
@@ -127,3 +149,23 @@ cache deleted) on the Thor, against stock Azahar on the same settings:
 - no visible shader hitches;
 - `compile_waits 0` and `skipped 0` in the log;
 - the log's ubershader and fallback counts, and speed through the opening.
+
+### 0.0.1-alpha on the Thor (2026-10-29)
+
+Fire Emblem Awakening and Dark Moon, Vulkan, 2x, in one app session. Every ledger line had
+`compile_waits 0` and `skipped 0`; the ubershader was prepared in 1,194 ms the first time
+and 127–152 ms from its cache afterwards. Graphics looked right in FEA. The phase is not
+passed:
+
+- **Slowdowns.** Speed fell well below 100%, with pauses, whenever new shaders were
+  needed. In Dark Moon's first 12 seconds, 31,010 of 31,963 draws were GPU-vertex draws
+  shaded on the CPU, with 58 specialized pipelines still queued. Fixed in 0.0.2-alpha as
+  described above; the timing line will show what remains.
+- **Crash** in Dark Moon soon after the opening cutscene began. The log ends 14 s into the
+  game, at its last error line, because the file was flushed only at errors; the cause is
+  not known yet. 0.0.2-alpha flushes the log continuously and waits for compile jobs before
+  a title switch erases a shader cache they point into (a latent use-after-free, not shown
+  to be this crash).
+- **Flashes** of what looked like later scenes, briefly, when the game first loaded and
+  just before the crash. Not explained yet; a comparison with stock Azahar on the same
+  scene would show whether Claudhar causes them.
