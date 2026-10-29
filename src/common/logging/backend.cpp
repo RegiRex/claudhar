@@ -1,6 +1,7 @@
 // Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <chrono>
 #include <boost/algorithm/string/replace.hpp>
@@ -461,6 +462,13 @@ private:
                 // (for example, when the stop token is signaled).
                 if (entry.filename != nullptr) {
                     write_logs();
+                    // Claudhar: the file used to be flushed only for errors, so a crash lost
+                    // every line since the last one. Writing out what else is queued and
+                    // then flushing keeps the file current and a burst still costs one flush.
+                    for (int burst = 0; burst < 1000 && message_queue.TryPop(entry); ++burst) {
+                        write_logs();
+                    }
+                    file_backend.Flush();
                 }
             }
             // Drain the logging queue. Only writes out up to MAX_LOGS_TO_WRITE to prevent a
