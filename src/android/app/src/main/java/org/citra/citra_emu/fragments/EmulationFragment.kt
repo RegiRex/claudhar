@@ -1,7 +1,8 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 package org.citra.citra_emu.fragments
 
@@ -78,6 +79,7 @@ import org.citra.citra_emu.utils.DirectoryInitialization
 import org.citra.citra_emu.utils.DirectoryInitialization.DirectoryInitializationState
 import org.citra.citra_emu.utils.EmulationLifecycleUtil
 import org.citra.citra_emu.utils.EmulationMenuSettings
+import org.citra.citra_emu.utils.GameDrivers
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GameIconUtils
 import org.citra.citra_emu.utils.Log
@@ -161,7 +163,11 @@ class EmulationFragment :
 
         // So this fragment doesn't restart on configuration changes; i.e. rotation.
         retainInstance = true
-        emulationState = EmulationState(launchPath)
+        // Claudhar: with the title ID, for the GPU driver chosen for this game.
+        emulationState = EmulationState(
+            launchPath,
+            if (game.titleId != 0L) String.format("%016X", game.titleId) else null
+        )
         screenAdjustmentUtil =
             ScreenAdjustmentUtil(
                 requireContext(),
@@ -1665,7 +1671,7 @@ class EmulationFragment :
         ViewCompat.setOnApplyWindowInsetsListener(binding.inGameMenu, applyCutoutInsets)
     }
 
-    private class EmulationState(private val gamePath: String) {
+    private class EmulationState(private val gamePath: String, private val gameId: String?) {
         private var state: State
         private var surface: Surface? = null
 
@@ -1782,6 +1788,8 @@ class EmulationFragment :
                 State.STOPPED -> {
                     Thread({
                         Log.debug("[EmulationFragment] Starting emulation thread.")
+                        // Claudhar: load the GPU driver this game uses before it boots.
+                        GameDrivers.prepare(gameId)
                         NativeLibrary.run(gamePath)
                     }, "NativeEmulation").start()
                 }

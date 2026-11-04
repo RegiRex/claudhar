@@ -224,12 +224,19 @@ object NativeLibrary {
      */
     external fun swapScreens(swapScreens: Boolean, rotation: Int)
 
+    /**
+     * Claudhar: returns 2 when the custom driver loaded, 1 for the system driver and 0 when
+     * nothing was loaded; it used to return nothing. The driver never changes while a game is
+     * running: with [waitForGame] the call waits for the game to end, otherwise it gives 0.
+     * See GameDrivers.
+     */
     external fun initializeGpuDriver(
         hookLibDir: String?,
         customDriverDir: String?,
         customDriverName: String?,
-        fileRedirectDir: String?
-    )
+        fileRedirectDir: String?,
+        waitForGame: Boolean
+    ): Int
 
     external fun areKeysAvailable(): Boolean
 

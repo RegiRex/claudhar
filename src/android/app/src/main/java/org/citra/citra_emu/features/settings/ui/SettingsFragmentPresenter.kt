@@ -1,7 +1,8 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 package org.citra.citra_emu.features.settings.ui
 
@@ -46,6 +47,7 @@ import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.fragments.ResetSettingsDialogFragment
 import org.citra.citra_emu.utils.BirthdayMonth
 import org.citra.citra_emu.utils.BuildUtil
+import org.citra.citra_emu.utils.GameDrivers
 import org.citra.citra_emu.utils.GraphicsUtil
 import org.citra.citra_emu.utils.Log
 import org.citra.citra_emu.utils.SystemSaveGame
@@ -940,6 +942,20 @@ class SettingsFragmentPresenter(
         setSectionTitle(R.string.preferences_graphics)
         sl.apply {
             add(HeaderSetting(R.string.renderer))
+            // Claudhar: the GPU driver this game uses. It is loaded when the game starts, so it
+            // cannot change while one is running.
+            if (isPerApp) {
+                add(
+                    RunnableSetting(
+                        R.string.game_gpu_driver,
+                        R.string.game_gpu_driver_description,
+                        false,
+                        0,
+                        { GameDrivers.showPicker(settingsActivity, gameId) { loadSettingsList() } },
+                        { GameDrivers.label(settingsActivity, gameId) }
+                    )
+                )
+            }
             add(
                 SingleChoiceSetting(
                     editingSettings,

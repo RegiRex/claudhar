@@ -23,6 +23,12 @@
     <!-- Claudhar: the report offered after a crash in the previous session. -->
     <string name="crash_report">Claudhar crashed last time</string>
     <string name="crash_report_description">A crash report was saved in the log folder of the user folder, named claudhar_crash_ and the date, with the last lines of the log. Please share it so the crash can be fixed.</string>
+    <!-- Claudhar: the GPU driver chosen per game (GameDrivers.kt). -->
+    <string name="game_gpu_driver">GPU driver</string>
+    <string name="game_gpu_driver_description">The GPU driver this game uses. A change applies when the game next starts.</string>
+    <string name="game_gpu_driver_global">Global driver (%1$s)</string>
+    <string name="game_gpu_driver_failed">The GPU driver chosen for this game could not be loaded, so %1$s is used.</string>
+    <string name="game_gpu_driver_save_failed">The GPU driver choice could not be saved.</string>
     <!-- Claudhar: the Phase 0 device probe on the home settings screen. -->
     <string name="device_probe">Device probe</string>
     <string name="device_probe_description">Measure this device\'s CPU, GPU, screens and controllers for Claudhar development</string>

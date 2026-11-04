@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 package org.citra.citra_emu.utils
 
@@ -25,6 +26,12 @@ object GpuDriverHelper {
     private var fileRedirectionPath: String? = null
     var driverInstallationPath: String? = null
     private var hookLibPath: String? = null
+
+    /**
+     * Claudhar: the driver library loaded now, as folder and library name; a null name is the
+     * system driver. Null before the first load.
+     */
+    private var loadedDriver: Pair<String?, String?>? = null
 
     val driverStoragePath: DocumentFile
         get() {
@@ -60,13 +67,51 @@ object GpuDriverHelper {
         hookLibPath = CitraApplication.appContext.applicationInfo.nativeLibraryDir + "/"
 
         // Initialize GPU driver.
-        NativeLibrary.initializeGpuDriver(
-            hookLibPath,
-            driverInstallationPath,
-            customDriverData.libraryName,
-            fileRedirectionPath
-        )
+        // Claudhar: through loadGlobalDriver, which records what is loaded for GameDrivers.
+        // Forced, since an install puts a new driver into the same folder.
+        loadGlobalDriver(force = true)
     }
+
+    /**
+     * Claudhar: loads the driver library [libraryName] from [directory], or the system driver
+     * when [libraryName] is null, unless it is loaded already and [force] is false. Returns 2
+     * when the custom driver loaded, 1 for the system driver (also when the custom one failed)
+     * and 0 when nothing changed. While a game is running, waits for it to end when
+     * [waitForGame] is set, as for the next game's driver, and otherwise changes nothing.
+     * Any thread, but only a thread that may wait should set [waitForGame].
+     */
+    @Synchronized
+    fun loadDriver(
+        directory: String?,
+        libraryName: String?,
+        force: Boolean = false,
+        waitForGame: Boolean = false
+    ): Int {
+        val wanted = Pair(if (libraryName == null) null else directory, libraryName)
+        if (!force && wanted == loadedDriver) {
+            return if (libraryName == null) 1 else 2
+        }
+        val outcome = NativeLibrary.initializeGpuDriver(
+            hookLibPath,
+            directory ?: driverInstallationPath,
+            libraryName,
+            fileRedirectionPath,
+            waitForGame
+        )
+        if (outcome != 0) {
+            loadedDriver = if (outcome == 2) wanted else Pair(null, null)
+        } else if (force) {
+            // A forced load follows a driver install into the same folder. Refused while a game
+            // runs, it leaves loaded a library whose files have since changed, so the next load
+            // must not take it for the current one.
+            loadedDriver = null
+        }
+        return outcome
+    }
+
+    /** Claudhar: loads the driver picked in the Driver Manager; see [loadDriver]. */
+    fun loadGlobalDriver(force: Boolean = false, waitForGame: Boolean = false): Int =
+        loadDriver(driverInstallationPath, customDriverData.libraryName, force, waitForGame)
 
     fun getDrivers(): MutableList<Pair<Uri, GpuDriverMetadata>> {
         val driverZips = driverStoragePath.listFiles()

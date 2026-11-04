@@ -1,7 +1,8 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 package org.citra.citra_emu.features.settings.ui
 
@@ -29,6 +30,7 @@ import org.citra.citra_emu.databinding.ActivitySettingsBinding
 import org.citra.citra_emu.features.settings.model.CitraSettings
 import org.citra.citra_emu.features.settings.model.SettingsViewModel
 import org.citra.citra_emu.features.settings.utils.SettingsFile
+import org.citra.citra_emu.utils.GameDrivers
 import org.citra.citra_emu.utils.InsetsHelper
 import org.citra.citra_emu.utils.RefreshRateUtil
 import org.citra.citra_emu.utils.SystemSaveGame
@@ -219,6 +221,8 @@ class SettingsActivity :
             // reset to global settings, save, and exit
             editingSettings.clearAllOverrides()
             SettingsFile.deletePerAppFile(editingSettings.gameId)
+            // Claudhar: the game's GPU driver choice is one of its settings too.
+            editingSettings.gameId?.let { GameDrivers.save(it, null) }
         } else {
             // This function deletes the main config file AND any other config files
             // that will store per-game settings and reloads from the default.
@@ -233,6 +237,7 @@ class SettingsActivity :
 
             SettingsFile.deleteAndResetSettingsFile()
             SettingsFile.deletePerAppSettingsDirectory()
+            GameDrivers.clear() // Claudhar: every game's GPU driver choice.
 
             // Set default values for system config file
             SystemSaveGame.apply {
