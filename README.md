@@ -65,18 +65,20 @@ new signing key, uninstall the previous Claudhar build before installing the new
 
 ## Checking the no-pause rules
 
-While a game runs, the log (Options → Share log) gets two lines every 10 seconds:
+While a game runs, the log (Options → Share log) gets three lines every 10 seconds:
 
 ```
 Claudhar shading: requested ..., drawn ... (specialized GPU-vertex ..., specialized
 CPU-vertex ..., ubershader GPU-vertex ..., ubershader CPU-vertex ...), empty ...,
 invalid ..., CPU-vertex fallbacks ..., building: ..., compile_waits 0, skipped 0
-Claudhar timing: ... frames in 10.0 s, slowest ... ms, ... over 50 ms; ...
+Claudhar timing: ... frames in 10.0 s, speed ...%, slowest second ...%; slowest frame ...
+Claudhar memory: GPU ... MiB in use of a ... MiB budget
 ```
 
 `compile_waits` and `skipped` must stay 0. Anything else is a bug worth reporting with
-the log. The timing line shows slow frames and what the emulation thread spent its time
-on; see [Phase 1](docs/PHASE1_UBERSHADER.md#counters). The first launch of a game spends a
+the log. The timing line shows the emulation speed, slow frames and what the emulation
+thread spent its time on, and the memory line the GPU memory in use; see
+[Phase 1](docs/PHASE1_UBERSHADER.md#counters). The first launch of a game spends a
 moment on the loading screen preparing the ubershader; later launches reuse it.
 
 ## Device probe

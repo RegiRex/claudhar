@@ -65,7 +65,11 @@ The design and its phases are in [docs/PLAN.md](docs/PLAN.md).
   ```
 - A modified Azahar file keeps its original header and adds, below it:
   `// Modified by the Claudhar Project in <year>; changes are marked "Claudhar:".`
-- `tools/claudhar/check_license_headers.py` enforces both in CI. Never remove or
+- A change ported from a newer Azahar is cherry-picked, keeping its author. Files it
+  touches take upstream's header for that file (GPLv3 or later where Azahar relicensed
+  it) and a notice line naming the port, and the port is listed in
+  [docs/AZAHAR_PORTS.md](docs/AZAHAR_PORTS.md) with what was left out.
+- `tools/claudhar/check_license_headers.py` enforces the notices in CI. Never remove or
   change upstream copyright notices.
 
 ## Measuring

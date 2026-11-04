@@ -363,7 +363,7 @@ settings.
 | **4. New Vulkan backend (Hybrid)** | CPU geometry with one vertex format, one host color and depth format, render-pass merging, the Phase 1 ubershader and blend variants. | Same zero counters. Faster than Phase 3 at 2x on the Thor. |
 | **5. Combo mode** | Background specialization on the new backend and optional GPU vertex shading for ready programs. | Same zero counters. Combo faster than Hybrid at 2x+ on at least one test scene, or reported as not helping. |
 | **6. CPU mode, multicore** | Tiled CPU renderer on all cores, background compiled fragment path. | Dark Moon playable at 1x in CPU mode on the Thor. Pixel tests match the reference. |
-| **7. Feature parity** | Custom textures, stereo 3D, save states, cheats, Amiibo, multiplayer, Artic Base, camera and microphone, per-game settings, device table entries. | Azahar feature checklist complete. |
+| **7. Feature parity** | Custom textures, stereo 3D, save states, cheats, Amiibo, multiplayer, Artic Base, camera and microphone, per-game settings (ported from Azahar in 0.0.3-alpha), device table entries. | Azahar feature checklist complete. |
 | **8. Guest cores on threads, fast memory** | Thread-safe kernel, guest system and New 3DS cores on their own threads, fast host memory mapping. | New 3DS title tests; no regressions in Accurate mode. |
 | **9. Tuning for the Duo** | Persistent translation cache, profile-guided warm-up, per-device defaults. | Duo targets met (Section 13). |
 

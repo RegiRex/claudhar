@@ -57,8 +57,10 @@ Claudhar shading: requested 120654, drawn 120344 (specialized GPU-vertex 101200,
 CPU-vertex 15022, ubershader GPU-vertex 3890, ubershader CPU-vertex 232), empty 310,
 invalid 0, CPU-vertex fallbacks 120, building: specialized 4, GPU-vertex ubershader 0,
 compile_waits 0, skipped 0
-Claudhar timing: 600 frames in 10.0 s, slowest 21 ms, 0 over 50 ms; CPU vertex shading of
-fallbacks 35 ms; pipelines created on the emulation thread 41 in 9.6 ms, slowest 0.4 ms
+Claudhar timing: 897 frames in 10.0 s, speed 150%, slowest second 121%; slowest frame 21
+ms, 0 over 50 ms; CPU vertex shading of fallbacks 35 ms; pipeline cache lookups on the
+emulation thread 41 in 9.6 ms, 0 over 2 ms, slowest 0.4 ms
+Claudhar memory: GPU 1843 MiB in use of a 11456 MiB budget
 ```
 
 `compile_waits` and `skipped` must be 0. Every draw the renderer is asked for is counted
@@ -70,10 +72,14 @@ built yet; each is requested and drawn once, on the CPU. `building` counts the p
 queued on worker threads and not finished.
 
 The timing line covers the same 10 seconds and shows what slows the game down without
-breaking a rule: frames (from one presented frame to the next; pausing the emulation shows
-as one long frame), the time the emulation thread spent shading fallback draws' vertices,
-and pipelines it created itself from the driver cache, which should each take well under a
-millisecond.
+breaking a rule. The renderer presents a frame for every 3DS screen refresh (59.83 per
+second), so frames per second give the emulation speed; the slowest whole second shows a
+short slowdown that the average hides. Time the emulation spent paused is left out
+(0.0.3-alpha; before, a pause showed as one long frame). Then come the time the emulation
+thread spent shading fallback draws' vertices, and the pipelines it created itself from the
+driver cache, which should each take well under a millisecond. The memory line gives the
+GPU memory the process holds, from the driver (`VK_EXT_memory_budget`), or the renderer's
+own allocations where the driver does not report it.
 
 The log file is flushed whenever its queue runs empty (0.0.2-alpha), so after a crash it
 ends where the game stopped. It used to be flushed only at errors.
@@ -169,3 +175,28 @@ passed:
 - **Flashes** of what looked like later scenes, briefly, when the game first loaded and
   just before the crash. Not explained yet; a comparison with stock Azahar on the same
   scene would show whether Claudhar causes them.
+
+### 0.0.2-alpha on the Thor (2026-11-03)
+
+Sonic & All-Stars Racing Transformed at 2x and Xenoblade Chronicles 3D at 2x, then at 4x,
+with turbo (a 400% speed cap). Speeds below are frames per 10 seconds against the 3DS's
+59.83 per second. Every ledger line had `compile_waits 0` and `skipped 0`.
+
+- **GPU-vertex ubershader pipelines worked.** CPU-vertex fallbacks fell to 824 of 15.7
+  million draws in Sonic and 636 of 19.4 million in Xenoblade at 2x; shading them took at
+  most 69 ms in any 10 seconds.
+- **Speed.** Sonic held 140–160%. Xenoblade at 2x ran between 86% and 350% per 10 seconds;
+  at 4x between 66% and 208%, with three 10-second stretches holding 45–66 frames over
+  50 ms, that is seconds near 30% speed. Those stretches had almost no fallbacks or
+  pipeline creation, so the time went elsewhere; GPU load at 4x is the likely limit but GPU
+  time is not measured. The owner's view: games that ran well ran almost perfectly, with
+  highs well above the best Uberhar results and lows about at Uberhar's best lows.
+- **Pipeline creation** from the driver cache on the emulation thread mostly took well
+  under a millisecond, but up to 14–16 ms in a game's first seconds.
+- **A 14-second "frame"** in Sonic was the app paused; 0.0.3-alpha leaves pauses out.
+- **Crash** in Xenoblade at 4x about 160 seconds in: the driver refused a queue submit with
+  `VK_ERROR_INITIALIZATION_FAILED`, which is not a result `vkQueueSubmit` may return and
+  which stock Azahar does not catch either. The cause is not known; GPU memory running out
+  is one possibility. 0.0.3-alpha logs GPU memory every 10 seconds and on a failed submit,
+  retries the submit once after the GPU goes idle, and puts the end of the log into the
+  crash report.
