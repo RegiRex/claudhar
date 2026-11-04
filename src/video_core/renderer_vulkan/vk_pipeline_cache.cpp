@@ -553,8 +553,12 @@ void PipelineCache::PrepareUbershaders(const std::atomic_bool& stop_loading,
         sources_hash =
             Common::HashCombine(sources_hash, Common::ComputeHash64(source.data(), source.size()));
     }
+    // One file per driver as well: games can use different GPU drivers, and a cache made by
+    // one is rejected by another, which would compile everything again at each switch.
+    const auto driver = instance.GetPipelineCacheUUID();
     uber_pipeline_cache_path =
-        fmt::format("{}claudhar-ubershader-{:016X}.bin", GetPipelineCacheDir(), sources_hash);
+        fmt::format("{}claudhar-ubershader-{:016X}-{:016X}.bin", GetPipelineCacheDir(),
+                    sources_hash, Common::ComputeHash64(driver.data(), driver.size()));
     LoadUberPipelineCache();
 
     // Compile the variants on every core, then create each one's pipeline for every render
@@ -639,14 +643,15 @@ void PipelineCache::LoadUberPipelineCache() {
     std::vector<u8> data;
     if (Settings::values.use_disk_shader_cache && EnsureDirectories() &&
         !uber_pipeline_cache_path.empty()) {
-        // Caches made for earlier ubershader sources are of no further use.
+        // Caches made for earlier ubershader sources are of no further use; those of other
+        // drivers for the same sources are kept.
+        const std::string current = uber_pipeline_cache_path.substr(GetPipelineCacheDir().size());
+        const std::string sources = current.substr(0, current.rfind('-') + 1);
         FileUtil::ForeachDirectoryEntry(
             nullptr, GetPipelineCacheDir(),
-            [this](u64*, const std::string& directory, const std::string& name) {
-                const std::string path = directory + DIR_SEP + name;
-                if (name.starts_with("claudhar-ubershader-") &&
-                    name != uber_pipeline_cache_path.substr(GetPipelineCacheDir().size())) {
-                    FileUtil::Delete(path);
+            [&sources](u64*, const std::string& directory, const std::string& name) {
+                if (name.starts_with("claudhar-ubershader-") && !name.starts_with(sources)) {
+                    FileUtil::Delete(directory + DIR_SEP + name);
                 }
                 return true;
             });
