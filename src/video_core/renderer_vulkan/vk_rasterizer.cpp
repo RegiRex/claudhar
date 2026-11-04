@@ -151,9 +151,14 @@ RasterizerVulkan::~RasterizerVulkan() = default;
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     res_cache.TickFrame();
-    // Claudhar: a summary of the draw counters and timings every few seconds.
-    pipeline_cache.Ledger().CountFrame();
-    pipeline_cache.Ledger().LogPeriodically();
+    // Claudhar: a summary of the draw counters and timings every few seconds, and the GPU
+    // memory in use at the same moment.
+    auto& ledger = pipeline_cache.Ledger();
+    ledger.CountFrame();
+    if (ledger.LogPeriodically()) {
+        // Claudhar log line: one per interval, after the timings.
+        LOG_INFO(Render_Vulkan, "Claudhar memory: GPU {}", instance.GpuMemoryReport());
+    }
 }
 
 void RasterizerVulkan::LoadDefaultDiskResources(

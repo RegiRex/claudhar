@@ -1,14 +1,54 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <limits>
 #include <mutex>
+#include "common/assert.h"
+#include "common/logging/log.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 
 namespace Vulkan {
 
 constexpr u64 WAIT_TIMEOUT = std::numeric_limits<u64>::max();
+
+namespace {
+
+/**
+ * Claudhar: submits one batch to the graphics queue, on the scheduler's worker thread with
+ * the submit mutex held. Only a lost device used to be caught; any other error escaped as an
+ * exception and aborted the app without a word in the log, as the Thor's driver did once with
+ * VK_ERROR_INITIALIZATION_FAILED (not a result vkQueueSubmit may return) in Xenoblade at 4x.
+ * A failure is now logged with the GPU memory in use. Unless the device is lost, the queue is
+ * drained so the driver can release what earlier work holds, and the batch is submitted once
+ * more: a failed submit leaves its fence and semaphores untouched. A second failure is fatal,
+ * as before, but explained in the log.
+ */
+void Submit(const Instance& instance, const vk::SubmitInfo& submit_info, vk::Fence fence) {
+    const vk::Queue queue = instance.GetGraphicsQueue();
+    vk::Result result = queue.submit(1, &submit_info, fence);
+    if (result == vk::Result::eSuccess) [[likely]] {
+        return;
+    }
+    LOG_ERROR(Render_Vulkan, "Claudhar: queue submit failed with {}; GPU memory: {}",
+              vk::to_string(result), instance.GpuMemoryReport());
+    if (result != vk::Result::eErrorDeviceLost) {
+        try {
+            queue.waitIdle();
+            result = queue.submit(1, &submit_info, fence);
+        } catch (const vk::SystemError& err) {
+            LOG_ERROR(Render_Vulkan, "Claudhar: waiting for the queue failed: {}", err.what());
+        }
+        if (result == vk::Result::eSuccess) {
+            LOG_WARNING(Render_Vulkan, "Claudhar: queue submit succeeded when retried");
+            return;
+        }
+    }
+    UNREACHABLE_MSG("Vulkan queue submit failed: {}", vk::to_string(result));
+}
+
+} // Anonymous namespace
 
 MasterSemaphoreTimeline::MasterSemaphoreTimeline(const Instance& instance_) : instance{instance_} {
     const vk::StructureChain semaphore_chain = {
@@ -95,11 +135,7 @@ void MasterSemaphoreTimeline::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore
         .pSignalSemaphores = signal_semaphores.data(),
     };
 
-    try {
-        instance.GetGraphicsQueue().submit(submit_info);
-    } catch (vk::DeviceLostError& err) {
-        UNREACHABLE_MSG("Device lost during submit: {}", err.what());
-    }
+    Submit(instance, submit_info, {}); // Claudhar: see Submit.
 }
 
 constexpr u64 FENCE_RESERVE = 8;
@@ -147,11 +183,7 @@ void MasterSemaphoreFence::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wa
 
     const vk::Fence fence = GetFreeFence();
 
-    try {
-        instance.GetGraphicsQueue().submit(submit_info, fence);
-    } catch (vk::DeviceLostError& err) {
-        UNREACHABLE_MSG("Device lost during submit: {}", err.what());
-    }
+    Submit(instance, submit_info, fence); // Claudhar: see Submit.
 
     std::scoped_lock lock{wait_mutex};
     wait_queue.emplace(fence, signal_value);

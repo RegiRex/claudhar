@@ -421,7 +421,8 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    boost::container::static_vector<const char*, 13> enabled_extensions;
+    // Claudhar: room for VK_EXT_memory_budget too.
+    boost::container::static_vector<const char*, 14> enabled_extensions;
     const auto add_extension = [&](std::string_view extension, bool blacklist = false,
                                    std::string_view reason = "") -> bool {
         const auto result =
@@ -476,6 +477,8 @@ bool Instance::CreateDevice() {
     const bool has_fragment_shader_barycentric =
         add_extension(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME, is_moltenvk,
                       "the PerVertexKHR attribute is not supported by MoltenVK");
+    // Claudhar: lets the log show the GPU memory the process holds; it changes nothing else.
+    memory_budget = add_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 
     const auto family_properties = physical_device.getQueueFamilyProperties();
     if (family_properties.empty()) {
@@ -669,6 +672,39 @@ void Instance::CreateAllocator() {
     if (result != VK_SUCCESS) {
         UNREACHABLE_MSG("Failed to initialize VMA with error {}", result);
     }
+}
+
+// Claudhar: see the header. The driver's figures include memory the renderer did not allocate
+// itself, such as pipelines and command buffers.
+std::string Instance::GpuMemoryReport() const {
+    const vk::PhysicalDeviceMemoryProperties heaps = physical_device.getMemoryProperties();
+    const auto device_local = [&](u32 heap) {
+        return static_cast<bool>(heaps.memoryHeaps[heap].flags &
+                                 vk::MemoryHeapFlagBits::eDeviceLocal);
+    };
+    u64 used = 0;
+    if (memory_budget) {
+        const auto chain =
+            physical_device.getMemoryProperties2<vk::PhysicalDeviceMemoryProperties2,
+                                                 vk::PhysicalDeviceMemoryBudgetPropertiesEXT>();
+        const auto& budget = chain.get<vk::PhysicalDeviceMemoryBudgetPropertiesEXT>();
+        u64 available = 0;
+        for (u32 heap = 0; heap < heaps.memoryHeapCount; ++heap) {
+            if (device_local(heap)) {
+                used += budget.heapUsage[heap];
+                available += budget.heapBudget[heap];
+            }
+        }
+        return fmt::format("{} MiB in use of a {} MiB budget", used >> 20, available >> 20);
+    }
+    std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> budgets{};
+    vmaGetHeapBudgets(allocator, budgets.data());
+    for (u32 heap = 0; heap < heaps.memoryHeapCount; ++heap) {
+        if (device_local(heap)) {
+            used += budgets[heap].usage;
+        }
+    }
+    return fmt::format("{} MiB allocated by the renderer (no driver total)", used >> 20);
 }
 
 void Instance::CollectToolingInfo() {

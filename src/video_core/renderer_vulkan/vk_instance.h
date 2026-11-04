@@ -1,10 +1,12 @@
 // Copyright 2022-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
 #include <span>
+#include <string>
 
 #include "video_core/pica/regs_pipeline.h"
 #include "video_core/rasterizer_cache/pixel_format.h"
@@ -165,6 +167,11 @@ public:
     bool IsPipelineCreationCacheControlSupported() const {
         return pipeline_creation_cache_control;
     }
+
+    /// Claudhar: the device-local GPU memory in use and available, for the log. With
+    /// VK_EXT_memory_budget the driver reports everything the process holds; without it only
+    /// the renderer's own allocations are known. Any thread.
+    std::string GpuMemoryReport() const;
 
     /// Returns true when VK_EXT_shader_stencil_export is supported
     bool IsShaderStencilExportSupported() const {
@@ -331,6 +338,7 @@ protected:
     bool fragment_shader_interlock{};
     bool image_format_list{};
     bool pipeline_creation_cache_control{};
+    bool memory_budget{}; ///< Claudhar: VK_EXT_memory_budget, for GpuMemoryReport.
     bool fragment_shader_barycentric{};
     bool shader_stencil_export{};
     bool external_memory_host{};
