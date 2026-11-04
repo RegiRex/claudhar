@@ -15,4 +15,7 @@ relicensed it) and a notice line saying the Claudhar Project ported the change.
 | Shortcut relaunch fixes ([#2656](https://github.com/azahar-emu/azahar/pull/2656), [#2658](https://github.com/azahar-emu/azahar/pull/2658)) | Relaunching a running game from a home-screen shortcut, and closing a game launched from one | 0.0.3-alpha, with #2698's version of `EmulationActivity` | Nothing; they came with that file. 2126.2 set `launchedFromShortcut` but checked `launched_from_shortcut` |
 
 Per-application settings do not cover the custom GPU driver: Azahar installs one driver
-for the whole app, outside `config.ini`.
+for the whole app, outside `config.ini`. Claudhar adds that itself in 0.0.4-alpha, adapted
+from the owner's Uberhar build: a game's driver is picked in its Per-Application Settings
+(Graphics), kept in `config/drivers.ini` and loaded just before the game starts
+(`GameDrivers.kt`).
