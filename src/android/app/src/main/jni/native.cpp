@@ -1,7 +1,8 @@
 // Copyright 2019-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 #include <algorithm>
 #include <codecvt>
@@ -24,6 +25,7 @@
 #include "common/x64/cpu_detect.h"
 #endif
 
+#include "claudhar/shading/draw_ledger.h"
 #include "common/common_paths.h"
 #include "common/dynamic_library/dynamic_library.h"
 #include "common/file_derived.h"
@@ -383,6 +385,8 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
 
             std::unique_lock pause_lock{paused_mutex};
             running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
+            // Claudhar: the frame that spans the pause is not a slowdown in the timing log.
+            Claudhar::Shading::MarkEmulationPaused();
             window->PollEvents();
         }
     }

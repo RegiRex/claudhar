@@ -12,7 +12,9 @@
 //
 // The ledger also times what can slow the emulation thread down without breaking a rule:
 // long frames, shading the vertices of fallback draws on the CPU, and creating pipelines
-// from the driver cache. Those timings cover the time since the last log line.
+// from the driver cache. Those timings cover the time since the last log line, leaving out
+// time the emulation spent paused. The renderer presents once per 3DS screen refresh, so
+// frames per second of emulation time give the emulation speed.
 
 #pragma once
 
@@ -64,7 +66,8 @@ struct DrawLedger {
         cpu_vertex_time += time;
     }
 
-    /// Adds one pipeline created on the emulation thread and the time it took.
+    /// Adds one attempt to create a pipeline from the driver cache on the emulation thread,
+    /// and the time it took.
     void CountPipelineCreation(Clock::duration time);
 
     /// Marks the end of a frame. Called once per frame from TickFrame.
@@ -75,12 +78,13 @@ struct DrawLedger {
 
     /// Logs the summary and the timings at most every `interval` while draws happen, and
     /// the summary whenever a rule counter (compile waits, skipped) changed. Called once per
-    /// frame, between draws, when every request has its outcome.
-    void LogPeriodically(std::chrono::seconds interval = std::chrono::seconds{10});
+    /// frame, between draws, when every request has its outcome. Returns true when it logged
+    /// the timings, so the caller can add its own figures for the same interval.
+    bool LogPeriodically(std::chrono::seconds interval = std::chrono::seconds{10});
 
 private:
     /// One log line with the timings since the last one.
-    [[nodiscard]] std::string Timings(Clock::time_point now) const;
+    [[nodiscard]] std::string Timings() const;
 
     Clock::time_point last_log{};
     u64 logged_drawn = 0;
@@ -89,12 +93,21 @@ private:
     // Timings since last_log.
     Clock::time_point last_frame{};
     u32 frames = 0;
-    u32 slow_frames = 0; ///< Frames over 50 ms: a visible hitch.
+    Clock::duration frame_time{}; ///< The frames' total: elapsed time without pauses.
+    u32 slow_frames = 0;          ///< Frames over 50 ms: a visible hitch.
     Clock::duration slowest_frame{};
+    u32 second_frames = 0;         ///< Frames in the current second of frame_time.
+    Clock::duration second_time{}; ///< frame_time since the current second began.
+    double slowest_second = 0.0;   ///< Lowest speed of a whole second, 0 before the first.
     Clock::duration cpu_vertex_time{};
     u32 pipeline_creations = 0;
+    u32 slow_pipeline_creations = 0; ///< Those over 2 ms.
     Clock::duration pipeline_time{};
     Clock::duration slowest_pipeline{};
 };
+
+/// Tells the ledger that the emulation was paused, so the frame that spans the pause is
+/// left out of the timings. Called by the frontend's emulation thread when it resumes.
+void MarkEmulationPaused();
 
 } // namespace Claudhar::Shading

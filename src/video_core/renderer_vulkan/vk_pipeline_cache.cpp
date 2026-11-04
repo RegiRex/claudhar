@@ -454,6 +454,10 @@ GraphicsPipeline* PipelineCache::GpuVertexUberPipeline(const PipelineInfo& info)
 }
 
 bool PipelineCache::TryBuildCached(GraphicsPipeline* pipeline) {
+    // A queued pipeline is checked on every draw until it is built; that is not a lookup.
+    if (pipeline->IsQueued()) {
+        return false;
+    }
     const auto start = std::chrono::steady_clock::now();
     const bool built = pipeline->TryBuildCached();
     ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start);

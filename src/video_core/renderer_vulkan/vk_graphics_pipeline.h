@@ -332,6 +332,11 @@ public:
     /// builds that have not finished. Emulation thread only.
     void BuildInBackground(std::atomic<u32>& building);
 
+    /// Claudhar: true once BuildInBackground queued it, until IsDone. Emulation thread only.
+    [[nodiscard]] bool IsQueued() noexcept {
+        return is_pending && !IsDone();
+    }
+
     bool Build(bool fail_on_compile_required = false);
 
     [[nodiscard]] vk::Pipeline Handle() const noexcept {

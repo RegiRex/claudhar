@@ -191,7 +191,8 @@ private:
     /// for a GPU-vertex draw, or null while it is being built.
     GraphicsPipeline* GpuVertexUberPipeline(const PipelineInfo& info);
 
-    /// Claudhar: TryBuildCached, timed for the ledger, since it runs on the emulation thread.
+    /// Claudhar: TryBuildCached, timed for the ledger since it runs on the emulation thread.
+    /// A pipeline already queued for a background build returns false at once, uncounted.
     bool TryBuildCached(GraphicsPipeline* pipeline);
 
     /// Claudhar: loads and saves the ubershader pipelines' own driver cache. It is kept

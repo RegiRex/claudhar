@@ -5,6 +5,7 @@
 // Formats and logs the draw ledger; see draw_ledger.h.
 
 #include <algorithm>
+#include <atomic>
 #include <fmt/format.h>
 
 #include "claudhar/shading/draw_ledger.h"
@@ -13,27 +14,57 @@
 namespace Claudhar::Shading {
 
 namespace {
+/// The 3DS refreshes its screens every 4,481,136 cycles of its 268,111,856 Hz clock.
+constexpr double REFRESH_RATE = 268111856.0 / 4481136.0;
+
+/// Set by MarkEmulationPaused, taken by the next CountFrame.
+std::atomic<bool> paused{false};
+
 /// A duration in milliseconds, for the log.
 double Ms(DrawLedger::Clock::duration time) {
     return std::chrono::duration<double, std::milli>(time).count();
 }
+
+/// The emulation speed in percent of `frames` presented in `time`.
+double Speed(u32 frames, DrawLedger::Clock::duration time) {
+    const double seconds = std::chrono::duration<double>(time).count();
+    return seconds > 0.0 ? 100.0 * frames / (REFRESH_RATE * seconds) : 0.0;
+}
 } // namespace
+
+void MarkEmulationPaused() {
+    paused.store(true, std::memory_order_relaxed);
+}
 
 void DrawLedger::CountPipelineCreation(Clock::duration time) {
     ++pipeline_creations;
+    slow_pipeline_creations += time > std::chrono::milliseconds{2};
     pipeline_time += time;
     slowest_pipeline = std::max(slowest_pipeline, time);
 }
 
 void DrawLedger::CountFrame() {
     const auto now = Clock::now();
-    if (last_frame == Clock::time_point{}) {
+    const bool first = last_frame == Clock::time_point{};
+    if (first) {
         last_log = now; // The first timings cover the first frames, not the loading.
-    } else {
+    }
+    // A frame that spans a pause is not a hitch; leave it out.
+    if (!paused.exchange(false, std::memory_order_relaxed) && !first) {
         const auto time = now - last_frame;
         ++frames;
+        frame_time += time;
         slow_frames += time > std::chrono::milliseconds{50};
         slowest_frame = std::max(slowest_frame, time);
+        // The slowest whole second shows a short slowdown that the average hides.
+        ++second_frames;
+        second_time += time;
+        if (second_time >= std::chrono::seconds{1}) {
+            const double speed = Speed(second_frames, second_time);
+            slowest_second = slowest_second == 0.0 ? speed : std::min(slowest_second, speed);
+            second_frames = 0;
+            second_time = {};
+        }
     }
     last_frame = now;
 }
@@ -50,22 +81,23 @@ std::string DrawLedger::Summary() const {
         building_ubershaders.load(std::memory_order_relaxed), compile_waits, Skipped());
 }
 
-std::string DrawLedger::Timings(Clock::time_point now) const {
-    return fmt::format("{} frames in {:.1f} s, slowest {:.0f} ms, {} over 50 ms; CPU vertex "
-                       "shading of fallbacks {:.0f} ms; pipelines created on the emulation "
-                       "thread {} in {:.1f} ms, slowest {:.1f} ms",
-                       frames, Ms(now - last_log) / 1000.0, Ms(slowest_frame), slow_frames,
-                       Ms(cpu_vertex_time), pipeline_creations, Ms(pipeline_time),
-                       Ms(slowest_pipeline));
+std::string DrawLedger::Timings() const {
+    return fmt::format("{} frames in {:.1f} s, speed {:.0f}%, slowest second {:.0f}%; slowest "
+                       "frame {:.0f} ms, {} over 50 ms; CPU vertex shading of fallbacks {:.0f} "
+                       "ms; pipeline cache lookups on the emulation thread {} in {:.1f} ms, {} "
+                       "over 2 ms, slowest {:.1f} ms",
+                       frames, Ms(frame_time) / 1000.0, Speed(frames, frame_time), slowest_second,
+                       Ms(slowest_frame), slow_frames, Ms(cpu_vertex_time), pipeline_creations,
+                       Ms(pipeline_time), slow_pipeline_creations, Ms(slowest_pipeline));
 }
 
-void DrawLedger::LogPeriodically(std::chrono::seconds interval) {
+bool DrawLedger::LogPeriodically(std::chrono::seconds interval) {
     const auto now = Clock::now();
     const u64 rule_breaks = compile_waits + Skipped();
     const bool rule_broken = rule_breaks != logged_rule_breaks;
     const bool due = Drawn() != logged_drawn && now - last_log >= interval;
     if (!rule_broken && !due) {
-        return;
+        return false;
     }
     logged_rule_breaks = rule_breaks;
     // Claudhar log line: one per interval at most, plus one when a rule counter changes.
@@ -75,14 +107,17 @@ void DrawLedger::LogPeriodically(std::chrono::seconds interval) {
         LOG_INFO(Render_Vulkan, "Claudhar shading: {}", Summary());
     }
     if (!due) {
-        return;
+        return false;
     }
     // Claudhar log line: the timings of the same interval.
-    LOG_INFO(Render_Vulkan, "Claudhar timing: {}", Timings(now));
+    LOG_INFO(Render_Vulkan, "Claudhar timing: {}", Timings());
     last_log = now;
     logged_drawn = Drawn();
-    frames = slow_frames = pipeline_creations = 0;
-    slowest_frame = cpu_vertex_time = pipeline_time = slowest_pipeline = {};
+    frames = slow_frames = second_frames = pipeline_creations = slow_pipeline_creations = 0;
+    frame_time = slowest_frame = second_time = cpu_vertex_time = pipeline_time =
+        slowest_pipeline = {};
+    slowest_second = 0.0;
+    return true;
 }
 
 } // namespace Claudhar::Shading
