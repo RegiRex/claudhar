@@ -9,10 +9,14 @@ import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.FragmentActivity
 import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 import org.citra.citra_emu.BuildConfig
 import org.citra.citra_emu.R
 
@@ -20,13 +24,22 @@ import org.citra.citra_emu.R
  * Claudhar: reports the last crash without needing a computer. When Claudhar crashes,
  * Android keeps a record of it; for a native crash that record (a tombstone) holds the
  * signal, the crashing thread's backtrace and recent log lines. On the next launch this
- * reads the record, decodes it to text, saves it as log/claudhar_crash.txt in the user
- * folder and offers to share it, once per crash. The emulator library keeps its symbol
- * table, so the backtrace names the crashing functions.
+ * reads the record, decodes it to text, adds the end of the crashed session's log, saves it
+ * as log/claudhar_crash_<date>.txt in the user folder and offers to share it, once per crash.
+ * The newest few reports are kept. The emulator library keeps its symbol table, so the
+ * backtrace names the crashing functions.
  */
 object CrashReport {
-    private const val FILE_NAME = "claudhar_crash.txt"
+    private const val FILE_PREFIX = "claudhar_crash_"
+    private const val KEPT_REPORTS = 5
     private const val LAST_REPORTED = "claudhar_last_reported_crash"
+
+    /** Log lines scanned from the end, and the most kept after leaving out repeats. */
+    private const val LOG_SCAN_LINES = 600
+    private const val LOG_TAIL_LINES = 80
+
+    /** A log written to within this long of the crash is taken as the crashed session's. */
+    private const val LOG_MATCH_MS = 10 * 60 * 1000L
     private var checked = false
 
     /**
@@ -38,8 +51,9 @@ object CrashReport {
         checked = true
         val context = activity.applicationContext
         Thread {
-            val report = describeLastCrash(context) ?: return@Thread
-            val saved = DeviceProbe.save(context, FILE_NAME, report)
+            val (name, report) = describeLastCrash(context) ?: return@Thread
+            val saved = DeviceProbe.save(context, name, report)
+            removeOldReports(context)
             activity.runOnUiThread {
                 if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
                 MaterialAlertDialogBuilder(activity)
@@ -54,9 +68,11 @@ object CrashReport {
         }.start()
     }
 
-    /** The last exit as text if it was a crash not reported yet, otherwise null. */
+    /**
+     * The last exit's file name and text if it was a crash not reported yet, otherwise null.
+     */
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun describeLastCrash(context: Context): String? {
+    private fun describeLastCrash(context: Context): Pair<String, String>? {
         val exit = context.getSystemService(ActivityManager::class.java)
             .getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull()
             ?: return null
@@ -70,7 +86,10 @@ object CrashReport {
         if (preferences.getLong(LAST_REPORTED, 0L) >= exit.timestamp) return null
         preferences.edit().putLong(LAST_REPORTED, exit.timestamp).apply()
         val trace = runCatching { exit.traceInputStream?.use { it.readBytes() } }.getOrNull()
-        return buildString {
+        val name = FILE_PREFIX +
+            SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(exit.timestamp)) +
+            ".txt"
+        return name to buildString {
             appendLine("== Claudhar crash report ==")
             appendLine(
                 "app: ${BuildConfig.APPLICATION_ID} ${BuildConfig.VERSION_NAME} " +
@@ -89,6 +108,55 @@ object CrashReport {
 
                 else -> append(String(trace))
             }
+            appendLine("last lines of the crashed session's log:")
+            appendLine(crashedSessionLog(context, exit.timestamp) ?: "(not found)")
+        }
+    }
+
+    /**
+     * The end of the log the crashed session wrote. This launch has already started a new log
+     * and renamed that one azahar_log.old.txt, so the file written closest to the crash is
+     * used. Lines from a source that repeats many times near the end (stub warnings can fill
+     * a log) are left out, except Claudhar's own lines.
+     */
+    private fun crashedSessionLog(context: Context, crashTime: Long): String? = try {
+        val log = DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
+            ?.findFile("log")
+        val file = listOf("azahar_log.old.txt", "azahar_log.txt")
+            .mapNotNull { log?.findFile(it) }
+            .filter { abs(it.lastModified() - crashTime) < LOG_MATCH_MS }
+            .minByOrNull { abs(it.lastModified() - crashTime) }
+        file?.let {
+            context.contentResolver.openInputStream(it.uri)?.bufferedReader()?.useLines { lines ->
+                val tail = ArrayDeque<String>()
+                lines.forEach { line ->
+                    tail.addLast(line)
+                    if (tail.size > LOG_SCAN_LINES) tail.removeFirst()
+                }
+                // A line's source is what comes before its message: class, level and location.
+                val source = { line: String ->
+                    line.substringAfter("] ", "").substringBefore(": ", "")
+                }
+                val counts = tail.groupingBy(source).eachCount()
+                tail.filter { (counts[source(it)] ?: 0) <= 3 || it.contains("Claudhar") }
+                    .takeLast(LOG_TAIL_LINES)
+                    .joinToString("\n")
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Deletes all but the newest [KEPT_REPORTS] crash reports in the user folder. */
+    private fun removeOldReports(context: Context) {
+        runCatching {
+            DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
+                ?.findFile("log")
+                ?.listFiles()
+                ?.filter { it.name?.startsWith(FILE_PREFIX) == true }
+                ?.sortedByDescending { it.name }
+                ?.drop(KEPT_REPORTS)
+                ?.forEach { it.delete() }
         }
     }
 
