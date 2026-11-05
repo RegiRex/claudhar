@@ -117,7 +117,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // ubershader pipelines wait for their vertex shaders.
       pipeline_workers{num_worker_threads, "Pipeline workers", {}, Common::ThreadPriority::Low},
       shader_workers{num_worker_threads, "Shader workers"},
-      uber_workers{std::max<std::size_t>(num_worker_threads / 2, 1), "Claudhar ubershaders"},
+      // Claudhar: as many as the pipeline workers (0.0.6; half before). In games whose vertex
+      // shaders take seconds to compile, these are what keep draws off the CPU.
+      uber_workers{num_worker_threads, "Claudhar ubershaders"},
       descriptor_heaps{
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), BUFFER_BINDINGS, 32},
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), TEXTURE_BINDINGS<1>},
@@ -546,14 +548,14 @@ FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices
         info.state.shader_ids[i] = shader_hashes[i];
     }
 
+    GraphicsPipeline* specialized = nullptr;
     if (specialize) {
-        GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
-        if (pipeline->IsDone() || TryBuildCached(pipeline)) {
-            selected_pipeline = pipeline;
+        specialized = curr_disk_cache->GetPipeline(info);
+        if (specialized->IsDone() || TryBuildCached(specialized)) {
+            selected_pipeline = specialized;
             uber_selected = false;
             return FragmentPath::Specialized;
         }
-        pipeline->BuildInBackground(ledger.building);
     }
 
     // A GPU-vertex draw keeps its own vertex shader and borrows the ubershader for its
@@ -561,13 +563,24 @@ FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices
     // configuration, so it is ready long before most specialized ones. Until it is, the
     // draw's vertices are shaded on the CPU, which is much slower.
     if (gpu_vertices) {
-        if (GraphicsPipeline* const pipeline = GpuVertexUberPipeline(info)) {
-            selected_pipeline = pipeline;
-            uber_selected = true;
-            return FragmentPath::Ubershader;
+        GraphicsPipeline* const pipeline = GpuVertexUberPipeline(info);
+        if (!pipeline) {
+            // The specialized build waits until this one is built: both compile the draw's
+            // vertex shader, which in some games takes seconds (Dark Moon on Qualcomm's
+            // driver), and only this one takes the draw off the CPU. Queued together, it
+            // waited behind the specialized builds while the CPU shaded nearly every draw.
+            ++ledger.cpu_vertex_fallbacks;
+            return FragmentPath::CpuVertices;
         }
-        ++ledger.cpu_vertex_fallbacks;
-        return FragmentPath::CpuVertices;
+        if (specialized) {
+            specialized->BuildInBackground(ledger.building);
+        }
+        selected_pipeline = pipeline;
+        uber_selected = true;
+        return FragmentPath::Ubershader;
+    }
+    if (specialized) {
+        specialized->BuildInBackground(ledger.building);
     }
     selected_pipeline = UberPipeline(info);
     uber_selected = true;
@@ -594,7 +607,9 @@ GraphicsPipeline* PipelineCache::GpuVertexUberPipeline(const PipelineInfo& info)
 
 bool PipelineCache::TryBuildCached(GraphicsPipeline* pipeline) {
     // A queued pipeline is checked on every draw until it is built; that is not a lookup.
-    if (pipeline->IsQueued()) {
+    // Nor is one the driver cache already turned down, whose build may not be queued yet
+    // (see SelectPipeline).
+    if (pipeline->IsQueued() || pipeline->MissedDriverCache()) {
         return false;
     }
     const auto start = std::chrono::steady_clock::now();

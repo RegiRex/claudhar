@@ -84,14 +84,19 @@ GraphicsPipeline::~GraphicsPipeline() = default;
 
 // Claudhar: replaces TryBuild; see the header.
 bool GraphicsPipeline::TryBuildCached() {
-    // A queued build owns the pipeline until it finishes.
-    if (is_pending) {
+    // A queued build owns the pipeline until it finishes. Claudhar: and once the driver has
+    // turned the pipeline down, asking again only costs the emulation thread another lookup.
+    if (is_pending || driver_cache_missed) {
         return false;
     }
     const bool shaders_pending = std::any_of(
         stages.begin(), stages.end(), [](Shader* shader) { return shader && !shader->IsDone(); });
+    if (shaders_pending || !instance.IsPipelineCreationCacheControlSupported()) {
+        return false;
+    }
     // Ask the driver if it can give us the pipeline without compiling.
-    return !shaders_pending && instance.IsPipelineCreationCacheControlSupported() && Build(true);
+    driver_cache_missed = !Build(true);
+    return !driver_cache_missed;
 }
 
 // Claudhar: replaces TryBuild; see the header. The worker waits for the shaders itself.

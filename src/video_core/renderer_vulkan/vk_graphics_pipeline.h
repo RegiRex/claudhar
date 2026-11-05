@@ -337,6 +337,12 @@ public:
         return is_pending && !IsDone();
     }
 
+    /// Claudhar: true once TryBuildCached asked the driver and it would have had to compile.
+    /// Asking again cannot help; only a background build can. Emulation thread only.
+    [[nodiscard]] bool MissedDriverCache() const noexcept {
+        return driver_cache_missed;
+    }
+
     bool Build(bool fail_on_compile_required = false);
 
     [[nodiscard]] vk::Pipeline Handle() const noexcept {
@@ -355,6 +361,7 @@ private:
     PipelineInfo info;
     std::array<Shader*, 3> stages;
     bool is_pending{};
+    bool driver_cache_missed{}; // Claudhar: see MissedDriverCache.
 };
 
 } // namespace Vulkan
