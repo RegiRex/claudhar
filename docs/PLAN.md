@@ -283,6 +283,11 @@ work on the CPU.
 - Removed: asynchronous shaders, the disk shader cache toggle (the cache is always
   used), SPIR-V and optimizer toggles, "skip duplicate frames", and every Uberhar
   experiment switch.
+- A Testing section (owner request, 0.0.5-alpha) at the top of the settings, global and
+  per game, gathers the settings being compared on the device: the game's GPU driver, the
+  internal resolution, Prepare graphics before starting and Quick shader builds. They are
+  ordinary settings with per-game overrides. A test setting is removed again once a
+  measurement settles it.
 
 ---
 
@@ -371,6 +376,21 @@ Phase 1 produces the first build where the no-pause and no-skip rules hold on a 
 game. Phase 3 is where multicore speed is measured. Phase 0 showed that the zero-pause
 shading works inside Azahar's renderer, so it comes first (decision 4 in the
 [findings](PHASE0_FINDINGS.md)).
+
+**Queued** (owner, 2026-11-05), to take up once performance is further along:
+
+- **Export and import a game's shader record** between one's own devices. The record
+  (`shaders/vulkan/transferable/<title>_*.vkch`) holds fragment configurations, vertex
+  programs and pipeline states rather than anything driver-specific, and is regenerated
+  from them on another device, so a game played on the Thor could be prepared on the Duo
+  before its first frame there. It contains the game's vertex programs, so it is for
+  one's own devices, not for sharing.
+- **Per-game hint lists shipped with Claudhar**: fragment configurations and pipeline
+  states (register values only, no game code) recorded in test plays, built in the
+  background at a game's first start on any device. This is the nearest Claudhar can come
+  to the precompiling PC games do, which the Kyty PS5 emulator forks for Demon's Souls do
+  from the game's own shader binaries; the 3DS fragment stage has no such binaries.
+  Whether to distribute data derived from games is the owner's decision.
 
 ---
 

@@ -48,6 +48,40 @@ Code: `src/claudhar/shading/fs_ubershader.*` (generator and configuration buffer
 `vk_pipeline_cache.*`, `vk_graphics_pipeline.*`, `vk_rasterizer.*` and
 `vk_shader_disk_cache.*`.
 
+### Driver caches, preparing before play and quick builds (0.0.5-alpha)
+
+- **One driver pipeline cache per GPU driver for each game.** A game's driver cache was
+  named after the game and the GPU model only, and a driver that found another driver's
+  file deleted it, so moving a game between drivers (0.0.4-alpha lets each game have its
+  own) compiled all its pipelines again. Each driver now has its own file
+  (`<title>-<GPU>-<driver>.bin`). The files of the four most recently used drivers are
+  kept, in the order a `<title>-<GPU>.drivers` list records, since file times are not
+  reliable through Android's storage access. A file from before 0.0.5 is renamed after
+  the driver that wrote it, from its header. Two drivers that support different features
+  still make the game's shader record regenerate its SPIR-V at the loading screen when the
+  game moves between them; the pipelines are kept.
+- **Prepare graphics before starting** (off by default, per game). Pipelines recorded in
+  earlier sessions that the driver cache cannot supply are built on all cores at the
+  loading screen, with a progress count, instead of in the background while the
+  ubershader draws. The loading screen only waits when there is something to build: after
+  a driver change, an update or a cleared driver cache. Nothing changes during play. The
+  log says `Claudhar: built N pipelines before starting in T ms`.
+- **Quick shader builds** (a test setting, off by default, per game). A specialized
+  pipeline missing from the driver cache is first built with
+  `VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT` and without the driver cache, and draws
+  use it as soon as it is built. It is then built optimized on threads of its own
+  (`Claudhar optimize`, low priority), so no quick build waits behind an optimized one,
+  and the optimized pipeline replaces the quick one between draws. The quick one is
+  destroyed when the GPU has finished the work recorded with it; command recording takes
+  pipeline handles on the emulation thread for that. Whether it pays depends on the
+  driver: one that is not much faster without optimizations compiles each pipeline twice
+  for nothing (Kyty's Demon's Souls fork measured no gain on an NVIDIA desktop GPU). The
+  counters below show which. Draws never wait either way, and the setting stays only if
+  it helps on the Thor.
+
+The settings are in the Testing section of the settings, with the game's GPU driver and
+the internal resolution.
+
 ## Counters
 
 Every 10 seconds the log has two lines like
@@ -70,6 +104,12 @@ create from its cache, so the preparation can be extended to cover it. `CPU-vert
 fallbacks` counts GPU-vertex draws shaded on the CPU because no pipeline for them was
 built yet; each is requested and drawn once, on the CPU. `building` counts the pipelines
 queued on worker threads and not finished.
+
+With Quick shader builds on, the shading line ends with `quick builds N (X ms each),
+optimized after them M (Y ms each), optimizing P, quick draws Q`: the builds of each kind
+finished in the session and their average time, the optimized builds still queued, and
+the draws drawn with a quick build so far. Quick builds pay when X is well below Y and the
+ubershader draws fall compared with the same stretch played without the setting.
 
 The timing line covers the same 10 seconds and shows what slows the game down without
 breaking a rule. The renderer presents a frame for every 3DS screen refresh (59.83 per
