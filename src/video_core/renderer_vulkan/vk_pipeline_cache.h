@@ -111,6 +111,12 @@ public:
         return ledger;
     }
 
+    /// Claudhar: drops the pipeline builds no worker has started and waits for the running
+    /// ones and the shader modules. Called when the emulation stops, by the frontend before
+    /// shutdown takes locks the UI thread needs, and by the destructor. The pipeline cache
+    /// must not be used for drawing afterwards: dropped pipelines stay unbuilt.
+    void StopBackgroundWork();
+
     Pica::Shader::Generator::ExtraVSConfig CalcExtraConfig(
         const Pica::Shader::Generator::PicaVSConfig& config);
 

@@ -176,9 +176,9 @@ void PipelineCache::BuildLayout() {
 }
 
 PipelineCache::~PipelineCache() {
-    uber_workers.WaitForRequests(); // Claudhar: these build pipelines too.
-    pipeline_workers.WaitForRequests();
-    shader_workers.WaitForRequests();
+    // Claudhar: drops the builds nobody started and waits for the rest. It waited for every
+    // queued build, which with dozens of multi-second compiles froze the app on exit.
+    StopBackgroundWork();
     SaveDriverPipelineDiskCache();
     // Claudhar: keeps the ubershader variants that were created during play.
     SaveUberPipelineCache();
@@ -234,6 +234,18 @@ void PipelineCache::PreparePipelines(const std::atomic_bool& stop_loading,
              std::chrono::duration_cast<std::chrono::milliseconds>(
                  std::chrono::steady_clock::now() - start)
                  .count());
+}
+
+// Claudhar: see the header.
+void PipelineCache::StopBackgroundWork() {
+    // Pipelines nobody has started building are of no use any more: those of the disk cache
+    // are recorded there and are built again at the next start. Shader modules are left to
+    // finish, since a running build may be waiting for one, and each takes milliseconds.
+    pipeline_workers.DropPendingRequests();
+    uber_workers.DropPendingRequests();
+    pipeline_workers.WaitForRequests();
+    uber_workers.WaitForRequests();
+    shader_workers.WaitForRequests();
 }
 
 void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loading,

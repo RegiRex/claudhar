@@ -65,6 +65,11 @@ public:
     /// Switches the disk resources to the specified title
     void SwitchDiskResources(u64 title_id) override;
 
+    /// Claudhar: drops queued pipeline builds; see PipelineCache::StopBackgroundWork.
+    void StopBackgroundWork() override {
+        pipeline_cache.StopBackgroundWork();
+    }
+
 private:
     /// Syncs pipeline state from PICA registers
     void SyncDrawState();

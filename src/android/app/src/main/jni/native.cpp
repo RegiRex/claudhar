@@ -351,6 +351,13 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
 
     SCOPE_EXIT({ TryShutdown(); });
+    // Claudhar: runs before TryShutdown, on every way out of the loop below (scope exits run
+    // in reverse order). TryShutdown holds surface_mutex for the whole teardown, and the UI
+    // thread needs that lock when the game's window goes away; shutting down with dozens of
+    // multi-second pipeline builds queued under it froze the app until Android called it not
+    // responding. The queued builds are dropped and the running ones waited for here, outside
+    // the lock.
+    SCOPE_EXIT({ system.GPU().Renderer().Rasterizer()->StopBackgroundWork(); });
 
     system.RegisterCoreLoopThreadId();
 

@@ -1,6 +1,7 @@
 // Copyright 2015-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -81,6 +82,11 @@ public:
         [[maybe_unused]] const DiskResourceLoadCallback& callback) {}
 
     virtual void SwitchDiskResources([[maybe_unused]] u64 title_id) {}
+
+    /// Claudhar: stops background work that only serves later frames, such as queued pipeline
+    /// builds, and waits for what is already running. Called on the emulation thread once
+    /// emulation has stopped, before shutdown; nothing is drawn afterwards.
+    virtual void StopBackgroundWork() {}
 
     static void SetSwitchDiskResourcesCallback(const DiskResourceLoadCallback& callback) {
         switch_disk_resources_callback = callback;

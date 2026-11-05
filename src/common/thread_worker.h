@@ -109,6 +109,16 @@ public:
         });
     }
 
+    /// Claudhar: drops the requests no worker has started, counting them as done, so that
+    /// WaitForRequests waits only for the running ones. For work nobody needs any more, such
+    /// as pipeline builds still queued when the renderer shuts down. Any thread.
+    void DropPendingRequests() {
+        std::scoped_lock lock{queue_mutex};
+        work_done += requests.size();
+        requests = {};
+        wait_condition.notify_all();
+    }
+
     const std::size_t NumWorkers() const noexcept {
         return threads.size();
     }
