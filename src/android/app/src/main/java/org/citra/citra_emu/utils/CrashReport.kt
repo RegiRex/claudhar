@@ -8,6 +8,8 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
+import android.os.Process
+import android.os.SystemClock
 import androidx.annotation.RequiresApi
 import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.FragmentActivity
@@ -114,18 +116,24 @@ object CrashReport {
     }
 
     /**
-     * The end of the log the crashed session wrote. This launch has already started a new log
-     * and renamed that one azahar_log.old.txt, so the file written closest to the crash is
-     * used. Lines from a source that repeats many times near the end (stub warnings can fill
-     * a log) are left out, except Claudhar's own lines.
+     * The end of the log the crashed session wrote: the newest log last written before this
+     * process started, whether this launch has already started its own log (and renamed the
+     * crashed one azahar_log.old.txt) or not. It used to be the log written closest to the
+     * crash, which after an ANR noticed shortly before the restart was this launch's new log.
+     * Lines from a source that repeats many times near the end (stub warnings can fill a log)
+     * are left out, except Claudhar's own lines.
      */
     private fun crashedSessionLog(context: Context, crashTime: Long): String? = try {
         val log = DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
             ?.findFile("log")
+        val started = System.currentTimeMillis() -
+            (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
         val file = listOf("azahar_log.old.txt", "azahar_log.txt")
             .mapNotNull { log?.findFile(it) }
-            .filter { abs(it.lastModified() - crashTime) < LOG_MATCH_MS }
-            .minByOrNull { abs(it.lastModified() - crashTime) }
+            .filter {
+                it.lastModified() < started && abs(it.lastModified() - crashTime) < LOG_MATCH_MS
+            }
+            .maxByOrNull { it.lastModified() }
         file?.let {
             context.contentResolver.openInputStream(it.uri)?.bufferedReader()?.useLines { lines ->
                 val tail = ArrayDeque<String>()
