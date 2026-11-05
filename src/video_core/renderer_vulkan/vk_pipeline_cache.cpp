@@ -3,7 +3,10 @@
 // Refer to the license.txt file included.
 // Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include <algorithm>
 #include <chrono>
+#include <sstream>
+#include <thread>
 #include <utility>
 #include <boost/container/static_vector.hpp>
 
@@ -77,6 +80,17 @@ constexpr std::array<vk::DescriptorSetLayoutBinding, 7> BUFFER_BINDINGS = {{
 // pipelines use the FSConfig hash there, which these values do not collide with in practice.
 constexpr u64 UberShaderId(const Claudhar::Shading::UberKey& key) {
     return 0xC1A0D4A500000000ULL | key.Index();
+}
+
+// Claudhar: how many GPU drivers keep a driver pipeline cache for each title. Games can use
+// different drivers, and each driver's file holds the pipelines it compiled for that game.
+constexpr std::size_t KEPT_DRIVER_CACHES = 4;
+
+/// Claudhar: the part of a driver pipeline cache's file name that names the GPU driver which
+/// wrote it, from the driver's pipeline cache UUID.
+std::string DriverName(std::span<const u8> pipeline_cache_uuid) {
+    return fmt::format(
+        "{:016X}", Common::ComputeHash64(pipeline_cache_uuid.data(), pipeline_cache_uuid.size()));
 }
 
 template <u32 NumTex0>
@@ -248,12 +262,10 @@ void PipelineCache::LoadDriverPipelineDiskCache(
     }
 
     // Try to load existing pipeline cache for this game/device combination
-    const auto cache_dir = GetPipelineCacheDir();
-    const u32 vendor_id = instance.GetVendorID();
-    const u32 device_id = instance.GetDeviceID();
+    // Claudhar: and for this GPU driver; see TidyDriverPipelineCaches.
+    TidyDriverPipelineCaches();
     const u64 program_id = GetProgramID();
-    const auto cache_file_path =
-        fmt::format("{}{:016X}-{:X}{:X}.bin", cache_dir, program_id, vendor_id, device_id);
+    const auto cache_file_path = DriverPipelineCachePath();
 
     std::vector<u8> cache_data;
     FileUtil::IOFile cache_file{cache_file_path, "rb"};
@@ -295,14 +307,10 @@ void PipelineCache::SaveDriverPipelineDiskCache() {
         return;
     }
 
-    const auto cache_dir = GetPipelineCacheDir();
-    const u32 vendor_id = instance.GetVendorID();
-    const u32 device_id = instance.GetDeviceID();
-    const u64 program_id = GetProgramID();
     // Include both device info and program id in cache path to handle both GPU changes and
     // different games
-    const auto cache_file_path =
-        fmt::format("{}{:016X}-{:X}{:X}.bin", cache_dir, program_id, vendor_id, device_id);
+    // Claudhar: and the GPU driver, so each driver a game uses keeps its own pipelines.
+    const auto cache_file_path = DriverPipelineCachePath();
 
     FileUtil::IOFile cache_file{cache_file_path, "wb"};
     if (!cache_file.IsOpen()) {
@@ -316,6 +324,82 @@ void PipelineCache::SaveDriverPipelineDiskCache() {
         LOG_ERROR(Render_Vulkan, "Error during pipeline cache write");
         return;
     }
+}
+
+// Claudhar: see the header.
+std::string PipelineCache::DriverPipelineCachePath() const {
+    return fmt::format("{}{:016X}-{:X}{:X}-{}.bin", GetPipelineCacheDir(), GetProgramID(),
+                       instance.GetVendorID(), instance.GetDeviceID(),
+                       DriverName(instance.GetPipelineCacheUUID()));
+}
+
+// Claudhar: see the header. Runs while a title's caches load, before play or at a title
+// switch, so the directory scan is not in the draw path.
+void PipelineCache::TidyDriverPipelineCaches() const {
+    const std::string dir = GetPipelineCacheDir();
+    const std::string title = fmt::format("{:016X}-{:X}{:X}", GetProgramID(),
+                                          instance.GetVendorID(), instance.GetDeviceID());
+
+    // A file from before 0.0.5 has no driver in its name. Its header says which driver wrote
+    // it, so it is kept for that driver instead of being thrown away by the next one.
+    const std::string old_path = dir + title + ".bin";
+    if (FileUtil::Exists(old_path)) {
+        vk::PipelineCacheHeaderVersionOne header{};
+        FileUtil::IOFile file{old_path, "rb"};
+        const bool read = file.ReadBytes(&header, sizeof(header)) == sizeof(header);
+        file.Close();
+        const std::string path =
+            fmt::format("{}{}-{}.bin", dir, title, DriverName(header.pipelineCacheUUID));
+        if (!read || FileUtil::Exists(path) || !FileUtil::Rename(old_path, path)) {
+            FileUtil::Delete(old_path);
+        } else {
+            LOG_INFO(Render_Vulkan, "Claudhar: driver pipeline cache {} kept for its driver",
+                     old_path);
+        }
+    }
+
+    // The drivers with a file for this title: the loaded one first, then the others in the
+    // order they were last used, which the list file records (file times are not reliable
+    // through Android's storage access), then any the list does not know.
+    std::vector<std::string> on_disk;
+    FileUtil::ForeachDirectoryEntry(
+        nullptr, dir, [&](u64*, const std::string&, const std::string& name) {
+            // <title>-<16 hex digits>.bin
+            if (name.size() == title.size() + 21 && name.starts_with(title + "-") &&
+                name.ends_with(".bin")) {
+                on_disk.push_back(name.substr(title.size() + 1, 16));
+            }
+            return true;
+        });
+    std::vector<std::string> drivers{DriverName(instance.GetPipelineCacheUUID())};
+    const auto add = [&drivers](const std::string& driver) {
+        if (std::find(drivers.begin(), drivers.end(), driver) == drivers.end()) {
+            drivers.push_back(driver);
+        }
+    };
+    const std::string list_path = dir + title + ".drivers";
+    std::string listed;
+    FileUtil::ReadFileToString(true, list_path, listed);
+    std::istringstream lines{listed};
+    for (std::string line; std::getline(lines, line);) {
+        if (std::find(on_disk.begin(), on_disk.end(), line) != on_disk.end()) {
+            add(line);
+        }
+    }
+    std::for_each(on_disk.begin(), on_disk.end(), add);
+
+    // Forget the least recently used drivers beyond the kept number.
+    for (std::size_t i = KEPT_DRIVER_CACHES; i < drivers.size(); ++i) {
+        LOG_INFO(Render_Vulkan, "Claudhar: deleting the pipeline cache of an unused driver {}",
+                 drivers[i]);
+        FileUtil::Delete(fmt::format("{}{}-{}.bin", dir, title, drivers[i]));
+    }
+    drivers.resize(std::min(drivers.size(), KEPT_DRIVER_CACHES));
+    std::string text;
+    for (const std::string& driver : drivers) {
+        text += driver + '\n';
+    }
+    FileUtil::WriteStringToFile(true, list_path, text);
 }
 
 void PipelineCache::LoadDiskCache(const std::atomic_bool& stop_loading,

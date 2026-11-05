@@ -153,6 +153,17 @@ private:
     /// Stores the generated pipeline cache
     void SaveDriverPipelineDiskCache();
 
+    /// Claudhar: the file of this title's driver pipeline cache for the loaded GPU driver.
+    /// It used to be one file per title and GPU model, which the next driver to run the game
+    /// found invalid and deleted, so moving a game between drivers recompiled everything.
+    std::string DriverPipelineCachePath() const;
+
+    /// Claudhar: before that file is loaded, gives a file from before 0.0.5 the name of the
+    /// driver that wrote it, and deletes the files of the least recently used drivers beyond
+    /// a few. Records the order of use in a list file next to them. Emulation thread, while a
+    /// title's caches load.
+    void TidyDriverPipelineCaches() const;
+
     /// Loads the shader disk cache
     void LoadDiskCache(const std::atomic_bool& stop_loading = std::atomic_bool{false},
                        const VideoCore::DiskResourceLoadCallback& callback = {});
