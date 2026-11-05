@@ -1,7 +1,8 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 package org.citra.citra_emu.features.settings.model
 
@@ -116,6 +117,10 @@ class CitraSettings {
         const val SECTION_PERFORMANCE_OVERLAY = "Performance Overlay"
         const val SECTION_STORAGE = "Storage"
         const val SECTION_MISC = "Miscellaneous"
+
+        // Claudhar: the Testing settings menu. A menu only: its settings keep their own
+        // sections in config.ini.
+        const val MENU_TESTING = "Claudhar Testing"
 
         const val KEY_BUTTON_A = "button_a"
         const val KEY_BUTTON_B = "button_b"

@@ -131,6 +131,8 @@ class SettingsFragmentPresenter(
 
             CitraSettings.SECTION_PERFORMANCE_OVERLAY -> addPerformanceOverlaySettings(sl)
 
+            CitraSettings.MENU_TESTING -> addTestingSettings(sl) // Claudhar
+
             else -> {
                 fragmentView.showToastMessage("Unimplemented menu", false)
                 return
@@ -162,6 +164,15 @@ class SettingsFragmentPresenter(
             if (isPerApp) R.string.application_settings else R.string.preferences_settings
         )
         sl.apply {
+            // Claudhar: first, so the settings under test are one tap away.
+            add(
+                SubmenuSetting(
+                    R.string.claudhar_testing,
+                    R.string.claudhar_testing_description,
+                    R.drawable.ic_stats,
+                    CitraSettings.MENU_TESTING
+                )
+            )
             add(
                 SubmenuSetting(
                     R.string.preferences_general,
@@ -938,23 +949,71 @@ class SettingsFragmentPresenter(
             //  them to config files
         }
 
+    /**
+     * Claudhar: the GPU driver this game uses, shown in Graphics and in Testing. It is loaded
+     * when the game starts, so it cannot change while one is running. Per-game settings only.
+     */
+    private fun gameGpuDriverSetting() = RunnableSetting(
+        R.string.game_gpu_driver,
+        R.string.game_gpu_driver_description,
+        false,
+        0,
+        { GameDrivers.showPicker(settingsActivity, gameId) { loadSettingsList() } },
+        { GameDrivers.label(settingsActivity, gameId) }
+    )
+
+    /**
+     * Claudhar: the Testing section, the settings being compared in device tests in one place.
+     * Each one is an ordinary setting, so a game's choice here overrides the global one as
+     * anywhere else, is marked as customized, and long-press returns it to the global value.
+     */
+    private fun addTestingSettings(sl: ArrayList<SettingsItem>) {
+        setSectionTitle(R.string.claudhar_testing)
+        sl.apply {
+            if (isPerApp) {
+                add(gameGpuDriverSetting())
+            }
+            add(
+                SingleChoiceSetting(
+                    editingSettings,
+                    IntSetting.RESOLUTION_FACTOR,
+                    R.string.internal_resolution,
+                    R.string.internal_resolution_description,
+                    R.array.resolutionFactorNames,
+                    R.array.resolutionFactorValues,
+                    IntSetting.RESOLUTION_FACTOR.key,
+                    IntSetting.RESOLUTION_FACTOR.defaultValue
+                )
+            )
+            add(
+                SwitchSetting(
+                    editingSettings,
+                    BooleanSetting.PREPARE_BEFORE_START,
+                    R.string.prepare_before_start,
+                    R.string.prepare_before_start_description,
+                    BooleanSetting.PREPARE_BEFORE_START.key,
+                    BooleanSetting.PREPARE_BEFORE_START.defaultValue
+                )
+            )
+            add(
+                SwitchSetting(
+                    editingSettings,
+                    BooleanSetting.QUICK_SHADER_BUILDS,
+                    R.string.quick_shader_builds,
+                    R.string.quick_shader_builds_description,
+                    BooleanSetting.QUICK_SHADER_BUILDS.key,
+                    BooleanSetting.QUICK_SHADER_BUILDS.defaultValue
+                )
+            )
+        }
+    }
+
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
         setSectionTitle(R.string.preferences_graphics)
         sl.apply {
             add(HeaderSetting(R.string.renderer))
-            // Claudhar: the GPU driver this game uses. It is loaded when the game starts, so it
-            // cannot change while one is running.
             if (isPerApp) {
-                add(
-                    RunnableSetting(
-                        R.string.game_gpu_driver,
-                        R.string.game_gpu_driver_description,
-                        false,
-                        0,
-                        { GameDrivers.showPicker(settingsActivity, gameId) { loadSettingsList() } },
-                        { GameDrivers.label(settingsActivity, gameId) }
-                    )
-                )
+                add(gameGpuDriverSetting()) // Claudhar: see gameGpuDriverSetting.
             }
             add(
                 SingleChoiceSetting(
