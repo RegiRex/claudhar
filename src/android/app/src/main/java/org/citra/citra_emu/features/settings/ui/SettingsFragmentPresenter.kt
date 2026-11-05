@@ -995,14 +995,27 @@ class SettingsFragmentPresenter(
                     BooleanSetting.PREPARE_BEFORE_START.defaultValue
                 )
             )
+            // Claudhar (0.0.6): two Azahar settings that change the size of the shaders the
+            // GPU driver compiles, for games whose vertex shaders compile slowly (Dark Moon on
+            // Qualcomm's driver). They replace Quick shader builds, removed after testing.
             add(
                 SwitchSetting(
                     editingSettings,
-                    BooleanSetting.QUICK_SHADER_BUILDS,
-                    R.string.quick_shader_builds,
-                    R.string.quick_shader_builds_description,
-                    BooleanSetting.QUICK_SHADER_BUILDS.key,
-                    BooleanSetting.QUICK_SHADER_BUILDS.defaultValue
+                    BooleanSetting.SHADERS_ACCURATE_MUL,
+                    R.string.shaders_accurate_mul,
+                    R.string.shaders_accurate_mul_description,
+                    BooleanSetting.SHADERS_ACCURATE_MUL.key,
+                    BooleanSetting.SHADERS_ACCURATE_MUL.defaultValue
+                )
+            )
+            add(
+                SwitchSetting(
+                    editingSettings,
+                    BooleanSetting.DISABLE_SPIRV_OPTIMIZER,
+                    R.string.disable_spirv_optimizer,
+                    R.string.disable_spirv_optimizer_description,
+                    BooleanSetting.DISABLE_SPIRV_OPTIMIZER.key,
+                    BooleanSetting.DISABLE_SPIRV_OPTIMIZER.defaultValue
                 )
             )
         }

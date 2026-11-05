@@ -146,11 +146,6 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # 0 (default): Off, 1: On
 )") DECLARE_KEY(claudhar_prepare_before_start) BOOST_HANA_STRING(R"(
 
-# Claudhar test setting: build each new specialized pipeline without the driver's
-# optimizations first, so it replaces the ubershader sooner, then build it optimized
-# 0 (default): Off, 1: On
-)") DECLARE_KEY(claudhar_quick_shader_builds) BOOST_HANA_STRING(R"(
-
 # Resolution scale factor
 # 0: Auto (scales resolution to window size), 1: Native 3DS screen resolution, Otherwise a scale
 # factor for the 3DS resolution

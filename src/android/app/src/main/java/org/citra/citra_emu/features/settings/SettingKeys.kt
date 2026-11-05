@@ -39,9 +39,8 @@ object SettingKeys {
     external fun use_hw_shader(): String
     external fun use_disk_shader_cache(): String
 
-    // Claudhar: pipeline build test settings.
+    // Claudhar: Prepare graphics before starting.
     external fun claudhar_prepare_before_start(): String
-    external fun claudhar_quick_shader_builds(): String
     external fun shaders_accurate_mul(): String
     external fun use_vsync(): String
     external fun use_skip_duplicate_frames(): String

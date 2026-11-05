@@ -93,14 +93,9 @@ enum class BooleanSetting(
     SHADERS_ACCURATE_MUL(SettingKeys.shaders_accurate_mul(), CitraSettings.SECTION_RENDERER, false),
     DISK_SHADER_CACHE(SettingKeys.use_disk_shader_cache(), CitraSettings.SECTION_RENDERER, true),
 
-    // Claudhar: the pipeline build test settings, shown in the Testing section.
+    // Claudhar: Prepare graphics before starting, shown in the Testing section.
     PREPARE_BEFORE_START(
         SettingKeys.claudhar_prepare_before_start(),
-        CitraSettings.SECTION_RENDERER,
-        false
-    ),
-    QUICK_SHADER_BUILDS(
-        SettingKeys.claudhar_quick_shader_builds(),
         CitraSettings.SECTION_RENDERER,
         false
     ),
@@ -206,8 +201,7 @@ enum class BooleanSetting(
             APPLY_REGION_FREE_PATCH,
             EXPAND_TO_CUTOUT_AREA,
             // Claudhar: read when the game loads.
-            PREPARE_BEFORE_START,
-            QUICK_SHADER_BUILDS
+            PREPARE_BEFORE_START
         )
 
         fun from(key: String): BooleanSetting? =

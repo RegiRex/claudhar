@@ -212,9 +212,8 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.use_shader_jit);
     ReadSetting("Renderer", Settings::values.resolution_factor);
     ReadSetting("Renderer", Settings::values.use_disk_shader_cache);
-    // Claudhar: the pipeline build test settings, per game like the others.
+    // Claudhar: Prepare graphics before starting, per game like the others.
     ReadSetting("Renderer", Settings::values.claudhar_prepare_before_start);
-    ReadSetting("Renderer", Settings::values.claudhar_quick_shader_builds);
     ReadSetting("Renderer", Settings::values.use_vsync);
     ReadSetting("Renderer", Settings::values.use_skip_duplicate_frames);
     ReadSetting("Renderer", Settings::values.texture_filter);

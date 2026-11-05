@@ -40,9 +40,8 @@ foreach(KEY IN ITEMS
     "async_presentation"
     "use_hw_shader"
     "use_disk_shader_cache"
-    # Claudhar: test settings for how pipelines are built (see vk_pipeline_cache.cpp).
+    # Claudhar: Prepare graphics before starting (see vk_pipeline_cache.cpp).
     "claudhar_prepare_before_start"
-    "claudhar_quick_shader_builds"
     "shaders_accurate_mul"
     "use_vsync"
     "use_skip_duplicate_frames"

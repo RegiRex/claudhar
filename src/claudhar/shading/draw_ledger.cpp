@@ -70,31 +70,15 @@ void DrawLedger::CountFrame() {
 }
 
 std::string DrawLedger::Summary() const {
-    std::string summary =
-        fmt::format("requested {}, drawn {} (specialized GPU-vertex {}, specialized CPU-vertex {}, "
-                    "ubershader GPU-vertex {}, ubershader CPU-vertex {}), empty {}, invalid {}, "
-                    "CPU-vertex fallbacks {}, building: specialized {}, GPU-vertex ubershader {}, "
-                    "compile_waits {}, skipped {}",
-                    requested, Drawn(), specialized_gpu_vertices, specialized_cpu_vertices,
-                    ubershader_gpu_vertices, ubershader_cpu_vertices, empty, invalid,
-                    cpu_vertex_fallbacks, building.load(std::memory_order_relaxed),
-                    building_ubershaders.load(std::memory_order_relaxed), compile_waits, Skipped());
-    // Only when the test setting is on, so the usual line stays as it was.
-    if (quick_builds.enabled) {
-        const auto average_ms = [](const std::atomic<u64>& ns, const std::atomic<u32>& count) {
-            const u32 n = count.load(std::memory_order_relaxed);
-            return n ? static_cast<double>(ns.load(std::memory_order_relaxed)) / 1e6 / n : 0.0;
-        };
-        summary += fmt::format(
-            "; quick builds {} ({:.1f} ms each), optimized after them {} ({:.1f} ms each), "
-            "optimizing {}, quick draws {}",
-            quick_builds.quick.load(std::memory_order_relaxed),
-            average_ms(quick_builds.quick_ns, quick_builds.quick),
-            quick_builds.optimized.load(std::memory_order_relaxed),
-            average_ms(quick_builds.optimized_ns, quick_builds.optimized),
-            quick_builds.optimizing.load(std::memory_order_relaxed), quick_builds.draws);
-    }
-    return summary;
+    return fmt::format(
+        "requested {}, drawn {} (specialized GPU-vertex {}, specialized CPU-vertex {}, "
+        "ubershader GPU-vertex {}, ubershader CPU-vertex {}), empty {}, invalid {}, "
+        "CPU-vertex fallbacks {}, building: specialized {}, GPU-vertex ubershader {}, "
+        "compile_waits {}, skipped {}",
+        requested, Drawn(), specialized_gpu_vertices, specialized_cpu_vertices,
+        ubershader_gpu_vertices, ubershader_cpu_vertices, empty, invalid, cpu_vertex_fallbacks,
+        building.load(std::memory_order_relaxed),
+        building_ubershaders.load(std::memory_order_relaxed), compile_waits, Skipped());
 }
 
 std::string DrawLedger::Timings() const {

@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include "claudhar/shading/draw_ledger.h"
 #include "common/hash.h"
 #include "common/thread_worker.h"
 #include "video_core/pica/regs_pipeline.h"
@@ -331,45 +330,20 @@ public:
 
     /// Queues the pipeline to be built on a worker thread, once; `building` counts queued
     /// builds that have not finished. Emulation thread only.
-    /// Claudhar: with `quick` (the Quick Shader Builds test setting), the worker first builds
-    /// the pipeline without the driver's optimizations and outside the driver cache, so it
-    /// can replace the ubershader sooner, then queues the optimized build on `optimizer`, so
-    /// it never holds up the quick build of another pipeline; TakeOptimized puts it in use.
-    /// `quick` gets the counts.
-    void BuildInBackground(std::atomic<u32>& building,
-                           Claudhar::Shading::DrawLedger::QuickBuilds* quick = nullptr,
-                           Common::ThreadWorker* optimizer = nullptr);
+    void BuildInBackground(std::atomic<u32>& building);
 
     /// Claudhar: true once BuildInBackground queued it, until IsDone. Emulation thread only.
     [[nodiscard]] bool IsQueued() noexcept {
         return is_pending && !IsDone();
     }
 
-    /// Claudhar: true while the pipeline in use is a quick build. Read after IsDone.
-    /// Emulation thread only.
-    [[nodiscard]] bool IsQuick() const noexcept {
-        return quick_in_use;
-    }
-
-    /// Claudhar: once the optimized build that follows a quick one is ready, puts it in use
-    /// and returns the quick pipeline, which the caller must keep until the GPU has finished
-    /// the work recorded with it; otherwise returns an empty handle. Emulation thread only.
-    vk::UniquePipeline TakeOptimized();
-
     bool Build(bool fail_on_compile_required = false);
 
-    /// The pipeline in use. Claudhar: it can change when TakeOptimized swaps in an optimized
-    /// build, so command recording must take the handle on the emulation thread.
     [[nodiscard]] vk::Pipeline Handle() const noexcept {
         return *pipeline;
     }
 
 private:
-    /// Claudhar: creates the pipeline with `flags`, through `cache` (none for quick builds,
-    /// which are not worth keeping). Returns an empty handle when the driver reports that it
-    /// would have to compile (FAIL_ON_PIPELINE_COMPILE_REQUIRED). Any thread.
-    vk::UniquePipeline Create(vk::PipelineCreateFlags flags, vk::PipelineCache cache);
-
     const Instance& instance;
     RenderManager& renderpass_cache;
     Common::ThreadWorker* worker;
@@ -381,12 +355,6 @@ private:
     PipelineInfo info;
     std::array<Shader*, 3> stages;
     bool is_pending{};
-
-    // Claudhar: quick builds. The worker sets quick_in_use before MarkDone, and fills
-    // `optimized` before setting optimized_ready; TakeOptimized reads them after those.
-    bool quick_in_use{};
-    vk::UniquePipeline optimized;
-    std::atomic<bool> optimized_ready{};
 };
 
 } // namespace Vulkan

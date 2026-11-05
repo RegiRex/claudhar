@@ -178,9 +178,6 @@ void PipelineCache::BuildLayout() {
 PipelineCache::~PipelineCache() {
     uber_workers.WaitForRequests(); // Claudhar: these build pipelines too.
     pipeline_workers.WaitForRequests();
-    if (optimize_workers) {
-        optimize_workers->WaitForRequests(); // Claudhar: after the quick builds that feed it.
-    }
     shader_workers.WaitForRequests();
     SaveDriverPipelineDiskCache();
     // Claudhar: keeps the ubershader variants that were created during play.
@@ -190,16 +187,7 @@ PipelineCache::~PipelineCache() {
 
 void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
                               const VideoCore::DiskResourceLoadCallback& callback) {
-    // Claudhar: the test settings that change how pipelines are built, for this game. The
-    // optimize workers exist only with quick builds, which are their only work.
-    ledger.quick_builds.enabled = Settings::values.claudhar_quick_shader_builds.GetValue();
-    if (ledger.quick_builds.enabled && !optimize_workers) {
-        optimize_workers.reset(
-            new Common::ThreadWorker{std::max<std::size_t>(num_worker_threads / 2, 1),
-                                     "Claudhar optimize",
-                                     {},
-                                     Common::ThreadPriority::Low});
-    }
+    // Claudhar: the setting is per game, so it is read for the game being loaded.
     preparing = Settings::values.claudhar_prepare_before_start.GetValue();
     LoadDriverPipelineDiskCache(stop_loading, callback);
     LoadDiskCache(stop_loading, callback);
@@ -246,13 +234,6 @@ void PipelineCache::PreparePipelines(const std::atomic_bool& stop_loading,
              std::chrono::duration_cast<std::chrono::milliseconds>(
                  std::chrono::steady_clock::now() - start)
                  .count());
-}
-
-// Claudhar: see the header.
-void PipelineCache::FreeRetiredPipelines() {
-    while (!retired_pipelines.empty() && scheduler.IsFree(retired_pipelines.front().first)) {
-        retired_pipelines.pop_front();
-    }
 }
 
 void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loading,
@@ -519,9 +500,6 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
     if (erases) {
         uber_workers.WaitForRequests();
         pipeline_workers.WaitForRequests();
-        if (optimize_workers) {
-            optimize_workers->WaitForRequests();
-        }
         shader_workers.WaitForRequests();
     }
 
@@ -559,27 +537,11 @@ FragmentPath PipelineCache::SelectPipeline(PipelineInfo& info, bool gpu_vertices
     if (specialize) {
         GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
         if (pipeline->IsDone() || TryBuildCached(pipeline)) {
-            // A quick build gives way to its optimized build once that is ready. The quick
-            // pipeline is kept until the GPU has run the work recorded with it, and the
-            // pipeline is bound again so the optimized one is used at once.
-            if (pipeline->IsQuick()) {
-                if (vk::UniquePipeline quick = pipeline->TakeOptimized()) {
-                    retired_pipelines.emplace_back(scheduler.CurrentTick(), std::move(quick));
-                    current_pipeline = nullptr;
-                } else {
-                    ++ledger.quick_builds.draws;
-                }
-            }
             selected_pipeline = pipeline;
             uber_selected = false;
             return FragmentPath::Specialized;
         }
-        if (optimize_workers) {
-            pipeline->BuildInBackground(ledger.building, &ledger.quick_builds,
-                                        optimize_workers.get());
-        } else {
-            pipeline->BuildInBackground(ledger.building);
-        }
+        pipeline->BuildInBackground(ledger.building);
     }
 
     // A GPU-vertex draw keeps its own vertex shader and borrows the ubershader for its
@@ -854,9 +816,7 @@ void PipelineCache::BindPipeline(PipelineInfo& info) {
     GraphicsPipeline* const pipeline = selected_pipeline;
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
     const bool pipeline_dirty = (current_pipeline != pipeline) || is_dirty;
-    // Claudhar: the handle is taken here, on the emulation thread, rather than when the
-    // command runs: a quick build's pipeline is swapped for its optimized one between draws.
-    scheduler.Record([this, is_dirty, pipeline_dirty, pipeline_handle = pipeline->Handle(),
+    scheduler.Record([this, is_dirty, pipeline_dirty, pipeline,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
                       current_rasterization = current_info.state.rasterization,
@@ -959,7 +919,7 @@ void PipelineCache::BindPipeline(PipelineInfo& info) {
 
         // Claudhar: the selected pipeline is always built; there is nothing to wait for.
         if (pipeline_dirty) {
-            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_handle);
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
         }
 
         cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0,

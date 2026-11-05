@@ -34,8 +34,6 @@
     <string name="claudhar_testing_description">The settings being tested, in one place. A game can have its own choices here, as with its other settings.</string>
     <string name="prepare_before_start">Prepare graphics before starting</string>
     <string name="prepare_before_start_description">At the loading screen, build the graphics recorded in earlier sessions that the GPU driver has not built yet, as after a driver change or an update, so play starts at full speed. Otherwise they build in the background while you play. Applies at the next start.</string>
-    <string name="quick_shader_builds">Quick shader builds</string>
-    <string name="quick_shader_builds_description">Test setting. Build each new shader without driver optimizations first, so it replaces the slower ubershader sooner, then build it optimized. Helps only if the driver builds much faster that way; the log shows both times. Applies at the next start.</string>
     <!-- Claudhar: the Phase 0 device probe on the home settings screen. -->
     <string name="device_probe">Device probe</string>
     <string name="device_probe_description">Measure this device\'s CPU, GPU, screens and controllers for Claudhar development</string>

@@ -6,7 +6,6 @@
 #pragma once
 
 #include <bitset>
-#include <deque>
 #include <optional>
 
 #include "claudhar/shading/draw_ledger.h"
@@ -111,10 +110,6 @@ public:
     Claudhar::Shading::DrawLedger& Ledger() {
         return ledger;
     }
-
-    /// Claudhar: destroys the quick-build pipelines replaced by optimized builds once the GPU
-    /// has finished the work recorded with them. Called once per frame from TickFrame.
-    void FreeRetiredPipelines();
 
     Pica::Shader::Generator::ExtraVSConfig CalcExtraConfig(
         const Pica::Shader::Generator::PicaVSConfig& config);
@@ -272,15 +267,6 @@ private:
     /// instead of building them in the background; see PreparePipelines.
     bool preparing{};
     std::vector<GraphicsPipeline*> to_prepare;
-
-    /// Claudhar: quick-build pipelines replaced by optimized ones, with the scheduler tick
-    /// after which the GPU no longer uses them, oldest first.
-    std::deque<std::pair<u64, vk::UniquePipeline>> retired_pipelines;
-
-    /// Claudhar: builds the optimized pipelines that follow quick builds, at low priority,
-    /// apart from pipeline_workers so no quick build waits behind one. Created at load only
-    /// when Quick Shader Builds is on.
-    std::unique_ptr<Common::ThreadWorker> optimize_workers;
 };
 
 } // namespace Vulkan

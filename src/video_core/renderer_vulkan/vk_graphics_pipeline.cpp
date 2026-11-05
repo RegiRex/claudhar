@@ -95,67 +95,19 @@ bool GraphicsPipeline::TryBuildCached() {
 }
 
 // Claudhar: replaces TryBuild; see the header. The worker waits for the shaders itself.
-void GraphicsPipeline::BuildInBackground(std::atomic<u32>& building,
-                                         Claudhar::Shading::DrawLedger::QuickBuilds* quick,
-                                         Common::ThreadWorker* optimizer) {
+void GraphicsPipeline::BuildInBackground(std::atomic<u32>& building) {
     if (is_pending) {
         return;
     }
     is_pending = true;
     building.fetch_add(1, std::memory_order_relaxed);
-    worker->QueueWork([this, &building, quick, optimizer] {
-        if (!quick || !optimizer) {
-            Build();
-            building.fetch_sub(1, std::memory_order_relaxed);
-            return;
-        }
-        using Clock = Claudhar::Shading::DrawLedger::Clock;
-        auto start = Clock::now();
-        pipeline = Create(vk::PipelineCreateFlagBits::eDisableOptimization, {});
-        quick_in_use = true;
-        MarkDone();
-        quick->Count(true, Clock::now() - start);
+    worker->QueueWork([this, &building] {
+        Build();
         building.fetch_sub(1, std::memory_order_relaxed);
-
-        // The optimized build runs on its own threads, so the quick builds of other pipelines
-        // waiting on the ubershader are never queued behind it.
-        quick->optimizing.fetch_add(1, std::memory_order_relaxed);
-        optimizer->QueueWork([this, quick] {
-            const auto start = Clock::now();
-            optimized = Create({}, pipeline_cache);
-            optimized_ready.store(true, std::memory_order_release);
-            quick->Count(false, Clock::now() - start);
-            quick->optimizing.fetch_sub(1, std::memory_order_relaxed);
-        });
     });
 }
 
-// Claudhar: see the header.
-vk::UniquePipeline GraphicsPipeline::TakeOptimized() {
-    if (!quick_in_use || !optimized_ready.load(std::memory_order_acquire)) {
-        return {};
-    }
-    quick_in_use = false;
-    std::swap(pipeline, optimized);
-    return std::move(optimized);
-}
-
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {
-    // Claudhar: the creation moved to Create, which quick builds also use.
-    vk::UniquePipeline created = Create(
-        fail_on_compile_required ? vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequiredEXT
-                                 : vk::PipelineCreateFlags{},
-        pipeline_cache);
-    if (!created) {
-        return false;
-    }
-    pipeline = std::move(created);
-    MarkDone();
-    return true;
-}
-
-vk::UniquePipeline GraphicsPipeline::Create(vk::PipelineCreateFlags flags,
-                                            vk::PipelineCache cache) {
     MICROPROFILE_SCOPE(Vulkan_Pipeline);
 
     const u32 stride_alignment = instance.GetMinVertexStrideAlignment();
@@ -312,7 +264,6 @@ vk::UniquePipeline GraphicsPipeline::Create(vk::PipelineCreateFlags flags,
     }
 
     vk::GraphicsPipelineCreateInfo pipeline_info = {
-        .flags = flags,
         .stageCount = shader_count,
         .pStages = shader_stages.data(),
         .pVertexInputState = &vertex_input_info,
@@ -328,15 +279,21 @@ vk::UniquePipeline GraphicsPipeline::Create(vk::PipelineCreateFlags flags,
                                                      info.state.attachments.depth, false),
     };
 
-    auto result = instance.GetDevice().createGraphicsPipelineUnique(cache, pipeline_info);
+    if (fail_on_compile_required) {
+        pipeline_info.flags |= vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequiredEXT;
+    }
+
+    auto result = instance.GetDevice().createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
     if (result.result == vk::Result::eSuccess) {
-        return std::move(result.value);
+        pipeline = std::move(result.value);
     } else if (result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
-        return {};
+        return false;
     } else {
         UNREACHABLE_MSG("Graphics pipeline creation failed!");
     }
-    return {};
+
+    MarkDone();
+    return true;
 }
 
 } // namespace Vulkan
