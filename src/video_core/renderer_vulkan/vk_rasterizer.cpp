@@ -159,6 +159,8 @@ void RasterizerVulkan::TickFrame() {
         // Claudhar log line: one per interval, after the timings.
         LOG_INFO(Render_Vulkan, "Claudhar memory: GPU {}", instance.GpuMemoryReport());
     }
+    // Claudhar: quick-build pipelines that optimized ones replaced, once the GPU is done.
+    pipeline_cache.FreeRetiredPipelines();
 }
 
 void RasterizerVulkan::LoadDefaultDiskResources(

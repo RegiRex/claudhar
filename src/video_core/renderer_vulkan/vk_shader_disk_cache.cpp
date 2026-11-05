@@ -1480,9 +1480,14 @@ bool ShaderDiskCache::InitPLCache(const std::atomic_bool& stop_loading,
                 *parent.pipeline_layout, shaders, &parent.pipeline_workers);
 
             // Claudhar: a pipeline the driver cannot create from its cache is compiled in
-            // the background; the ubershader draws until it is ready.
+            // the background; the ubershader draws until it is ready. With Prepare Graphics
+            // Before Starting, the pipeline cache builds it before play instead.
             if (!it_pl.value()->TryBuildCached()) {
-                it_pl.value()->BuildInBackground(parent.ledger.building);
+                if (parent.preparing) {
+                    parent.to_prepare.push_back(it_pl.value().get());
+                } else {
+                    it_pl.value()->BuildInBackground(parent.ledger.building);
+                }
             }
 
             LOG_DEBUG(Render_Vulkan, "    built.");

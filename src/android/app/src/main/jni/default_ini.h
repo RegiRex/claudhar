@@ -1,6 +1,7 @@
 // Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -138,6 +139,17 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Reduce stuttering by storing and loading generated shaders to disk
 # 0: Off, 1 (default. On)
 )") DECLARE_KEY(use_disk_shader_cache) BOOST_HANA_STRING(R"(
+
+# Claudhar: at the loading screen, build the pipelines of earlier sessions that the GPU
+# driver's cache does not have (after a driver change or an update), instead of drawing with
+# the ubershader while they build in the background
+# 0 (default): Off, 1: On
+)") DECLARE_KEY(claudhar_prepare_before_start) BOOST_HANA_STRING(R"(
+
+# Claudhar test setting: build each new specialized pipeline without the driver's
+# optimizations first, so it replaces the ubershader sooner, then build it optimized
+# 0 (default): Off, 1: On
+)") DECLARE_KEY(claudhar_quick_shader_builds) BOOST_HANA_STRING(R"(
 
 # Resolution scale factor
 # 0: Auto (scales resolution to window size), 1: Native 3DS screen resolution, Otherwise a scale

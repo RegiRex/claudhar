@@ -6,6 +6,7 @@
 #pragma once
 
 #include <bitset>
+#include <deque>
 #include <optional>
 
 #include "claudhar/shading/draw_ledger.h"
@@ -111,6 +112,10 @@ public:
         return ledger;
     }
 
+    /// Claudhar: destroys the quick-build pipelines replaced by optimized builds once the GPU
+    /// has finished the work recorded with them. Called once per frame from TickFrame.
+    void FreeRetiredPipelines();
+
     Pica::Shader::Generator::ExtraVSConfig CalcExtraConfig(
         const Pica::Shader::Generator::PicaVSConfig& config);
 
@@ -211,6 +216,13 @@ private:
     void LoadUberPipelineCache();
     void SaveUberPipelineCache();
 
+    /// Claudhar: with the Prepare Graphics Before Starting setting, builds the pipelines of
+    /// earlier sessions that the driver cache could not supply, on all cores, before the game
+    /// starts, showing the progress; without it they are built in the background while the
+    /// ubershader draws. Only at the first load, never during play. Emulation thread.
+    void PreparePipelines(const std::atomic_bool& stop_loading,
+                          const VideoCore::DiskResourceLoadCallback& callback);
+
 private:
     const Instance& instance;
     Scheduler& scheduler;
@@ -254,6 +266,21 @@ private:
         uber_pipelines;
     vk::UniquePipelineCache uber_pipeline_cache;
     std::string uber_pipeline_cache_path;
+
+    /// Claudhar: while true (the first load, with Prepare Graphics Before Starting on), the
+    /// disk cache puts the pipelines it cannot create from the driver cache in to_prepare
+    /// instead of building them in the background; see PreparePipelines.
+    bool preparing{};
+    std::vector<GraphicsPipeline*> to_prepare;
+
+    /// Claudhar: quick-build pipelines replaced by optimized ones, with the scheduler tick
+    /// after which the GPU no longer uses them, oldest first.
+    std::deque<std::pair<u64, vk::UniquePipeline>> retired_pipelines;
+
+    /// Claudhar: builds the optimized pipelines that follow quick builds, at low priority,
+    /// apart from pipeline_workers so no quick build waits behind one. Created at load only
+    /// when Quick Shader Builds is on.
+    std::unique_ptr<Common::ThreadWorker> optimize_workers;
 };
 
 } // namespace Vulkan

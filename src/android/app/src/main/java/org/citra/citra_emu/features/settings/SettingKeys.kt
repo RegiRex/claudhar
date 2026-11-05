@@ -1,6 +1,7 @@
 // Copyright 2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 package org.citra.citra_emu.features.settings
 
@@ -37,6 +38,10 @@ object SettingKeys {
     external fun async_presentation(): String
     external fun use_hw_shader(): String
     external fun use_disk_shader_cache(): String
+
+    // Claudhar: pipeline build test settings.
+    external fun claudhar_prepare_before_start(): String
+    external fun claudhar_quick_shader_builds(): String
     external fun shaders_accurate_mul(): String
     external fun use_vsync(): String
     external fun use_skip_duplicate_frames(): String

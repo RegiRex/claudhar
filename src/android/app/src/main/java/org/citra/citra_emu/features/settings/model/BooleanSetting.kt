@@ -1,7 +1,8 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv3 or any later version
 // Refer to the LICENSE.txt file included.
-// Modified by the Claudhar Project in 2026: Azahar's per-application settings ported onto 2126.2.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:". Includes
+// Azahar's per-application settings, ported onto 2126.2.
 
 package org.citra.citra_emu.features.settings.model
 
@@ -91,6 +92,18 @@ enum class BooleanSetting(
     LINEAR_FILTERING(SettingKeys.filter_mode(), CitraSettings.SECTION_RENDERER, true),
     SHADERS_ACCURATE_MUL(SettingKeys.shaders_accurate_mul(), CitraSettings.SECTION_RENDERER, false),
     DISK_SHADER_CACHE(SettingKeys.use_disk_shader_cache(), CitraSettings.SECTION_RENDERER, true),
+
+    // Claudhar: the pipeline build test settings, shown in the Testing section.
+    PREPARE_BEFORE_START(
+        SettingKeys.claudhar_prepare_before_start(),
+        CitraSettings.SECTION_RENDERER,
+        false
+    ),
+    QUICK_SHADER_BUILDS(
+        SettingKeys.claudhar_quick_shader_builds(),
+        CitraSettings.SECTION_RENDERER,
+        false
+    ),
     DUMP_TEXTURES(SettingKeys.dump_textures(), CitraSettings.SECTION_UTILITY, false),
     CUSTOM_TEXTURES(SettingKeys.custom_textures(), CitraSettings.SECTION_UTILITY, false),
     ASYNC_CUSTOM_LOADING(SettingKeys.async_custom_loading(), CitraSettings.SECTION_UTILITY, true),
@@ -191,7 +204,10 @@ enum class BooleanSetting(
             ANDROID_HIDE_IMAGES,
             PERF_OVERLAY_ENABLE, // Works in overlay options, but not from the settings menu
             APPLY_REGION_FREE_PATCH,
-            EXPAND_TO_CUTOUT_AREA
+            EXPAND_TO_CUTOUT_AREA,
+            // Claudhar: read when the game loads.
+            PREPARE_BEFORE_START,
+            QUICK_SHADER_BUILDS
         )
 
         fun from(key: String): BooleanSetting? =

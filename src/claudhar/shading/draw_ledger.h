@@ -50,6 +50,29 @@ struct DrawLedger {
     std::atomic<u32> building{0};
     std::atomic<u32> building_ubershaders{0};
 
+    /// Quick builds, the Quick Shader Builds test setting: a specialized pipeline missing
+    /// from the driver cache is first built without the driver's optimizations, so it takes
+    /// over from the ubershader sooner, then built again optimized, which replaces it. The
+    /// counters show whether that pays on a driver: how long each kind of build took, and how
+    /// many draws used a quick build. Builds are counted by worker threads, draws by the
+    /// emulation thread. The figures cover the whole session.
+    struct QuickBuilds {
+        bool enabled = false;           ///< The setting, read when the game loads.
+        std::atomic<u32> quick{0};      ///< Quick builds finished.
+        std::atomic<u32> optimized{0};  ///< Optimized builds that followed one.
+        std::atomic<u32> optimizing{0}; ///< Optimized builds queued and not finished.
+        std::atomic<u64> quick_ns{0};   ///< Time spent in quick builds.
+        std::atomic<u64> optimized_ns{0};
+        u64 draws = 0; ///< Draws drawn with a quick build.
+
+        /// Adds a finished build of either kind and the time it took. Worker threads.
+        void Count(bool is_quick, Clock::duration time) {
+            const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(time).count();
+            (is_quick ? quick_ns : optimized_ns).fetch_add(ns, std::memory_order_relaxed);
+            (is_quick ? quick : optimized).fetch_add(1, std::memory_order_relaxed);
+        }
+    } quick_builds;
+
     /// Total draws drawn.
     [[nodiscard]] u64 Drawn() const {
         return specialized_gpu_vertices + specialized_cpu_vertices + ubershader_gpu_vertices +

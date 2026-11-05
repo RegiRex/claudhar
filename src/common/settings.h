@@ -1,6 +1,7 @@
 // Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
@@ -538,6 +539,14 @@ struct Values {
     SwitchableSetting<bool> async_presentation{true, Keys::async_presentation};
     SwitchableSetting<bool> use_hw_shader{true, Keys::use_hw_shader};
     SwitchableSetting<bool> use_disk_shader_cache{true, Keys::use_disk_shader_cache};
+    // Claudhar: at the loading screen, build the pipelines of earlier sessions that the driver
+    // cache does not have (after a driver change or an update) instead of drawing with the
+    // ubershader while they build in the background.
+    SwitchableSetting<bool> claudhar_prepare_before_start{false,
+                                                          Keys::claudhar_prepare_before_start};
+    // Claudhar: a test setting. Build each new specialized pipeline without the driver's
+    // optimizations first, so it replaces the ubershader sooner, then optimized.
+    SwitchableSetting<bool> claudhar_quick_shader_builds{false, Keys::claudhar_quick_shader_builds};
     SwitchableSetting<bool> use_skip_duplicate_frames{false, Keys::use_skip_duplicate_frames};
     SwitchableSetting<bool> shaders_accurate_mul{true, Keys::shaders_accurate_mul};
 #ifdef ANDROID // TODO: Fuck this -OS

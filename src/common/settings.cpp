@@ -1,6 +1,7 @@
 // Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <string_view>
 #include <utility>
@@ -136,6 +137,9 @@ void LogSettings() {
     log_setting("Utility_PreloadTextures", values.preload_textures.GetValue());
     log_setting("Utility_AsyncCustomLoading", values.async_custom_loading.GetValue());
     log_setting("Utility_UseDiskShaderCache", values.use_disk_shader_cache.GetValue());
+    // Claudhar: the test settings, so a log shows which were on.
+    log_setting("Claudhar_PrepareBeforeStart", values.claudhar_prepare_before_start.GetValue());
+    log_setting("Claudhar_QuickShaderBuilds", values.claudhar_quick_shader_builds.GetValue());
     log_setting("Audio_Emulation", GetAudioEmulationName(values.audio_emulation.GetValue()));
     log_setting("Audio_OutputType", values.output_type.GetValue());
     log_setting("Audio_OutputDevice", values.output_device.GetValue());
@@ -214,6 +218,8 @@ void RestoreGlobalState(bool is_powered_on) {
     values.async_presentation.SetGlobal(true);
     values.use_hw_shader.SetGlobal(true);
     values.use_disk_shader_cache.SetGlobal(true);
+    values.claudhar_prepare_before_start.SetGlobal(true); // Claudhar
+    values.claudhar_quick_shader_builds.SetGlobal(true);  // Claudhar
     values.shaders_accurate_mul.SetGlobal(true);
     values.use_vsync.SetGlobal(true);
     values.use_skip_duplicate_frames.SetGlobal(true);
