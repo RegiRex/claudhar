@@ -66,21 +66,34 @@ Code: `src/claudhar/shading/fs_ubershader.*` (generator and configuration buffer
   ubershader draws. The loading screen only waits when there is something to build: after
   a driver change, an update or a cleared driver cache. Nothing changes during play. The
   log says `Claudhar: built N pipelines before starting in T ms`.
-- **Quick shader builds** (a test setting, off by default, per game). A specialized
-  pipeline missing from the driver cache is first built with
-  `VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT` and without the driver cache, and draws
-  use it as soon as it is built. It is then built optimized on threads of its own
-  (`Claudhar optimize`, low priority), so no quick build waits behind an optimized one,
-  and the optimized pipeline replaces the quick one between draws. The quick one is
-  destroyed when the GPU has finished the work recorded with it; command recording takes
-  pipeline handles on the emulation thread for that. Whether it pays depends on the
-  driver: one that is not much faster without optimizations compiles each pipeline twice
-  for nothing (Kyty's Demon's Souls fork measured no gain on an NVIDIA desktop GPU). The
-  counters below show which. Draws never wait either way, and the setting stays only if
-  it helps on the Thor.
+- **Quick shader builds** (a test setting in 0.0.5 only). A specialized pipeline missing
+  from the driver cache was first built with `VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT`,
+  then optimized on threads of its own, the optimized pipeline replacing the quick one
+  between draws. The Thor showed it does not pay on either driver (see the device test
+  below): quick builds took longer than the optimized ones, ubershader draws did not fall,
+  and on Qualcomm's driver the extra compiles slowed the builds that matter most. 0.0.6
+  removes it.
 
-The settings are in the Testing section of the settings, with the game's GPU driver and
+These settings are in the Testing section of the settings, with the game's GPU driver and
 the internal resolution.
+
+### Exit, build order and lookups (0.0.6-alpha)
+
+- **Leaving a game no longer waits for queued builds.** The pipeline cache waited for
+  every queued background build when the renderer shut down, while the frontend held the
+  lock the UI thread needs when the game's window goes away. With Dark Moon on Qualcomm's
+  driver, dozens of builds of several seconds each were queued, and Android reported the
+  app as not responding. Queued builds are now dropped (they are recorded in the disk
+  cache and built at the next start), and the running ones are waited for before
+  shutdown takes that lock (`PipelineCache::StopBackgroundWork`, called through
+  `RasterizerInterface::StopBackgroundWork` by the Android frontend).
+- **GPU-vertex ubershader pipelines first.** A GPU-vertex draw's specialized pipeline is
+  queued only once its GPU-vertex ubershader pipeline is built. Both compile the draw's
+  vertex shader; only the ubershader one takes the draw off the CPU, and queued together
+  it waited behind the specialized builds. Those pipelines also get as many threads as the
+  specialized ones (four on the Thor, two before).
+- **One driver cache lookup per pipeline.** A pipeline the driver cache turned down is not
+  looked up again on the emulation thread; only its background build can make it.
 
 ## Counters
 
@@ -104,12 +117,6 @@ create from its cache, so the preparation can be extended to cover it. `CPU-vert
 fallbacks` counts GPU-vertex draws shaded on the CPU because no pipeline for them was
 built yet; each is requested and drawn once, on the CPU. `building` counts the pipelines
 queued on worker threads and not finished.
-
-With Quick shader builds on, the shading line ends with `quick builds N (X ms each),
-optimized after them M (Y ms each), optimizing P, quick draws Q`: the builds of each kind
-finished in the session and their average time, the optimized builds still queued, and
-the draws drawn with a quick build so far. Quick builds pay when X is well below Y and the
-ubershader draws fall compared with the same stretch played without the setting.
 
 The timing line covers the same 10 seconds and shows what slows the game down without
 breaking a rule. The renderer presents a frame for every 3DS screen refresh (59.83 per
@@ -240,3 +247,41 @@ with turbo (a 400% speed cap). Speeds below are frames per 10 seconds against th
   is one possibility. 0.0.3-alpha logs GPU memory every 10 seconds and on a failed submit,
   retries the submit once after the GPU goes idle, and puts the end of the log into the
   crash report.
+
+### 0.0.5-alpha on the Thor (2026-11-04)
+
+Runs from a cold cache (the game's shader cache deleted first), with turbo. Every ledger
+line had `compile_waits 0` and `skipped 0`.
+
+- **Sonic at 4x on Turnip v27, a per-game driver,** in four runs with Prepare graphics
+  before starting and Quick shader builds in each combination: 120–160% once racing, with
+  no difference between the runs. Turnip built a specialized pipeline in 27–28 ms on
+  average; a quick (unoptimized) build took 32–35 ms, longer. Ubershader draws over a run
+  were 948 without quick builds and 861 and 1,044 with them.
+- **Dark Moon at 2x on Qualcomm's driver (512.676):** 9–17% for as long as it was played,
+  with quick builds on and off. Each pipeline with the game's vertex shaders took seconds
+  to compile (quick builds 2.7–10 s on average, optimized 0.9–5 s); about 100 were queued
+  in the first 10 seconds, and the GPU-vertex ubershader pipelines finished at 2–5 per 10
+  seconds. Until a draw's pipeline is built its vertices are shaded on the CPU, which took
+  7–8 s of every 10 s. Driver cache lookups on the emulation thread took up to 58 ms, and up
+  to 1.3 s with quick builds on.
+- **Fire Emblem Awakening at 4x on Qualcomm's driver:** 102–277%, with the slowest seconds
+  at 33–50% while its pipelines were built.
+- **The two "crashes" leaving Dark Moon were ANRs:** shutdown waited for the queued builds
+  while holding the lock the UI thread needed. The crash reports also showed the next
+  launch's log instead of the crashed session's. 0.0.6 fixes both.
+- **Per-game drivers and per-driver caches worked:** Sonic loaded Turnip from its unpacked
+  folder, and the 0.0.4 cache file was renamed after the Qualcomm driver that wrote it.
+- **Prepare graphics before starting had nothing to do**, since every run began with the
+  game's shader cache deleted.
+
+What it means: in Dark Moon on Qualcomm's driver the vertex side is the limit. The
+GPU-vertex ubershader pipelines that 0.0.2 added compile too slowly there to keep draws
+off the CPU (in Sonic and Xenoblade they did; there, CPU-vertex draws were a few hundred in
+millions). 0.0.6 builds those pipelines first and with more threads, and puts two Azahar
+settings that change the size of the shaders the driver compiles (accurate multiplication
+and the SPIR-V optimizer) in the Testing section. If that is not enough, the candidates are
+a vertex shader interpreter on the GPU, which needs no compile per vertex shader (RPCS3 has
+one for the PS3), and shading CPU-vertex draws on several cores, planned for Phase 3.
+Turnip, which compiled Sonic's pipelines in about 30 ms, may also build Dark Moon's far
+faster; that is a test to run.

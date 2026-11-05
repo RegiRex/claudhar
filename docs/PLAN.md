@@ -285,9 +285,9 @@ work on the CPU.
   experiment switch.
 - A Testing section (owner request, 0.0.5-alpha) at the top of the settings, global and
   per game, gathers the settings being compared on the device: the game's GPU driver, the
-  internal resolution, Prepare graphics before starting and Quick shader builds. They are
-  ordinary settings with per-game overrides. A test setting is removed again once a
-  measurement settles it.
+  internal resolution, Prepare graphics before starting, accurate multiplication and the
+  SPIR-V optimizer. They are ordinary settings with per-game overrides. A test setting is
+  removed again once a measurement settles it, as Quick shader builds was in 0.0.6.
 
 ---
 
