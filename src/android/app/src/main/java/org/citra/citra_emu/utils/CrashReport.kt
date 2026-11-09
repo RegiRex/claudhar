@@ -29,7 +29,8 @@ import org.citra.citra_emu.R
  * reads the record, decodes it to text, adds the end of the crashed session's log, saves it
  * as log/claudhar_crash_<date>.txt in the user folder and offers to share it, once per crash.
  * The newest few reports are kept. The emulator library keeps its symbol table, so the
- * backtrace names the crashing functions.
+ * backtrace names the crashing functions. Android stopping Claudhar during a game, for
+ * instance for low memory, is reported the same way, with the memory it used.
  */
 object CrashReport {
     private const val FILE_PREFIX = "claudhar_crash_"
@@ -42,6 +43,10 @@ object CrashReport {
 
     /** A log written to within this long of the crash is taken as the crashed session's. */
     private const val LOG_MATCH_MS = 10 * 60 * 1000L
+
+    /** Log lines written when a game starts and when its renderer is torn down at the end. */
+    private const val GAME_STARTED = "[EmulationFragment] Starting application"
+    private const val GAME_ENDED = "Claudhar shading at exit"
     private var checked = false
 
     /**
@@ -78,14 +83,33 @@ object CrashReport {
         val exit = context.getSystemService(ActivityManager::class.java)
             .getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull()
             ?: return null
-        val kind = when (exit.reason) {
+        // Claudhar: Android also ends a process for reasons that are not a crash of its own,
+        // such as low memory. Those were not reported, so a game that vanished left no report
+        // (Dark Moon in 0.0.6). They are now reported when the session ended inside a game,
+        // which tells them from Android stopping Claudhar in the background. Being stopped by
+        // the user (force stop, removing the task) or by an update is never reported.
+        val crashed = when (exit.reason) {
             ApplicationExitInfo.REASON_CRASH_NATIVE -> "native crash"
             ApplicationExitInfo.REASON_CRASH -> "Java crash"
             ApplicationExitInfo.REASON_ANR -> "not responding (ANR)"
-            else -> return null
+            else -> null
         }
+        val stopped = when (exit.reason) {
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "stopped by Android: low memory"
+            ApplicationExitInfo.REASON_SIGNALED -> "stopped by signal ${exit.status}"
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ->
+                "stopped by Android: excessive resource use"
+            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "initialization failure"
+            ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "stopped: a dependency died"
+            ApplicationExitInfo.REASON_EXIT_SELF -> "exited by itself, status ${exit.status}"
+            ApplicationExitInfo.REASON_UNKNOWN -> "ended for an unknown reason"
+            else -> null
+        }
+        val kind = crashed ?: stopped ?: return null
         val preferences = PreferenceManager.getDefaultSharedPreferences(context)
         if (preferences.getLong(LAST_REPORTED, 0L) >= exit.timestamp) return null
+        val log = crashedSessionLog(context, exit.timestamp)
+        if (crashed == null && log?.inGame != true) return null
         preferences.edit().putLong(LAST_REPORTED, exit.timestamp).apply()
         val trace = runCatching { exit.traceInputStream?.use { it.readBytes() } }.getOrNull()
         val name = FILE_PREFIX +
@@ -111,9 +135,15 @@ object CrashReport {
                 else -> append(String(trace))
             }
             appendLine("last lines of the crashed session's log:")
-            appendLine(crashedSessionLog(context, exit.timestamp) ?: "(not found)")
+            appendLine(log?.tail ?: "(not found)")
         }
     }
+
+    /**
+     * The end of the crashed session's log, and whether that session ended inside a game:
+     * a game had started and its renderer had not logged its exit summary.
+     */
+    private class SessionLog(val tail: String, val inGame: Boolean)
 
     /**
      * The end of the log the crashed session wrote: the newest log last written before this
@@ -123,7 +153,7 @@ object CrashReport {
      * Lines from a source that repeats many times near the end (stub warnings can fill a log)
      * are left out, except Claudhar's own lines.
      */
-    private fun crashedSessionLog(context: Context, crashTime: Long): String? = try {
+    private fun crashedSessionLog(context: Context, crashTime: Long): SessionLog? = try {
         val log = DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
             ?.findFile("log")
         val started = System.currentTimeMillis() -
@@ -137,18 +167,28 @@ object CrashReport {
         file?.let {
             context.contentResolver.openInputStream(it.uri)?.bufferedReader()?.useLines { lines ->
                 val tail = ArrayDeque<String>()
+                var inGame = false
                 lines.forEach { line ->
                     tail.addLast(line)
                     if (tail.size > LOG_SCAN_LINES) tail.removeFirst()
+                    // The lines that start and end a game; see SessionLog.
+                    if (line.contains(GAME_STARTED)) {
+                        inGame = true
+                    } else if (line.contains(GAME_ENDED)) {
+                        inGame = false
+                    }
                 }
                 // A line's source is what comes before its message: class, level and location.
                 val source = { line: String ->
                     line.substringAfter("] ", "").substringBefore(": ", "")
                 }
                 val counts = tail.groupingBy(source).eachCount()
-                tail.filter { (counts[source(it)] ?: 0) <= 3 || it.contains("Claudhar") }
-                    .takeLast(LOG_TAIL_LINES)
-                    .joinToString("\n")
+                SessionLog(
+                    tail.filter { (counts[source(it)] ?: 0) <= 3 || it.contains("Claudhar") }
+                        .takeLast(LOG_TAIL_LINES)
+                        .joinToString("\n"),
+                    inGame
+                )
             }
         }
     } catch (e: Exception) {

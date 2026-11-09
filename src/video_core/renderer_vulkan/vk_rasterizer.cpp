@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 // Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/process_memory.h"
 #include "common/alignment.h"
 #include "common/literals.h"
 #include "common/logging/log.h"
@@ -152,12 +153,14 @@ void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     res_cache.TickFrame();
     // Claudhar: a summary of the draw counters and timings every few seconds, and the GPU
-    // memory in use at the same moment.
+    // and process memory in use at the same moment.
     auto& ledger = pipeline_cache.Ledger();
     ledger.CountFrame();
     if (ledger.LogPeriodically()) {
+        const std::string process = Claudhar::Diagnostics::ProcessMemoryReport();
         // Claudhar log line: one per interval, after the timings.
-        LOG_INFO(Render_Vulkan, "Claudhar memory: GPU {}", instance.GpuMemoryReport());
+        LOG_INFO(Render_Vulkan, "Claudhar memory: GPU {}{}{}", instance.GpuMemoryReport(),
+                 process.empty() ? "" : "; ", process);
     }
 }
 
