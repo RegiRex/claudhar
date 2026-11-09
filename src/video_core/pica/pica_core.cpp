@@ -3,7 +3,10 @@
 // Refer to the license.txt file included.
 // Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include <algorithm>
+#include <thread>
 #include "claudhar/diagnostics/frame_profile.h"
+#include "claudhar/jobs/parallel_for.h"
 #include "common/arch.h"
 #include "common/archives.h"
 #include "common/microprofile.h"
@@ -69,10 +72,32 @@ union CommandHeader {
 };
 static_assert(sizeof(CommandHeader) == sizeof(u32), "CommandHeader has incorrect size!");
 
+namespace {
+/// Claudhar: the threads that shade vertices beside the emulation thread: half the cores
+/// less the emulation thread's own, which on the Thor's and the Duo's eight cores is three,
+/// as many as the fast cores the emulation thread leaves free. None on two cores.
+u32 VertexWorkerCount() {
+    const u32 cores = std::max(std::thread::hardware_concurrency(), 2u);
+    return std::min(cores / 2 - 1, 7u);
+}
+
+/// Claudhar: draws with fewer vertices are shaded by LoadVertices' own loop, where waking
+/// the other threads would cost more than it saves.
+constexpr u32 MIN_PARALLEL_VERTICES = 64;
+
+/// Claudhar: the vertices a thread claims at a time: small enough that the threads finish
+/// close together, large enough that claiming costs little next to shading.
+constexpr u32 VERTICES_PER_CHUNK = 16;
+} // namespace
+
 PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> debug_context_)
     : memory{memory_}, debug_context{std::move(debug_context_)},
       geometry_pipeline{regs.internal, gs_unit, gs_setup},
       shader_engine{CreateEngine(Settings::values.use_shader_jit.GetValue())} {
+    // Claudhar: the threads LoadVerticesInParallel shades vertices on.
+    if (const u32 workers = VertexWorkerCount(); workers > 0) {
+        vertex_jobs = std::make_unique<Claudhar::Jobs::ParallelFor>(workers, "Claudhar vertices");
+    }
     InitializeRegs();
     dirty_regs.SetAllDirty();
 
@@ -1135,6 +1160,11 @@ void PicaCore::LoadVertices(bool is_indexed) {
     geometry_pipeline.Setup(shader_engine.get());
     ASSERT(!geometry_pipeline.NeedIndexInput() || is_indexed);
 
+    // Claudhar: a large draw is shaded on several cores instead.
+    if (LoadVerticesInParallel(is_indexed, loader, base_address, index_address_8, index_u16)) {
+        return;
+    }
+
     for (u32 index = 0; index < pipeline.num_vertices; ++index) {
         // Indexed rendering doesn't use the start offset
         const u32 vertex = is_indexed
@@ -1185,6 +1215,73 @@ void PicaCore::LoadVertices(bool is_indexed) {
         // Send to geometry pipeline
         geometry_pipeline.SubmitVertex(vs_output);
     }
+}
+
+// Claudhar: see the header. The vertex shader gives the same output for the same vertex, so
+// shading each vertex once, in any order and on any thread, gives the loop's results; the
+// loop's 64-entry vertex cache only saved it from shading a vertex again. Each thread has
+// its own shader unit. What stays in order on this thread is everything after the vertex
+// shader: the geometry shader, primitive assembly and the rasterizer.
+bool PicaCore::LoadVerticesInParallel(bool is_indexed, const VertexLoader& loader,
+                                      PAddr base_address, const u8* index_address_8,
+                                      bool index_u16) {
+    const auto& pipeline = regs.internal.pipeline;
+    const u32 num_vertices = pipeline.num_vertices;
+    if (!vertex_jobs || debug_context || num_vertices < MIN_PARALLEL_VERTICES ||
+        geometry_pipeline.NeedIndexInput()) {
+        return false;
+    }
+
+    // The vertices to shade, each once. An indexed draw also notes, for each of its indices,
+    // where that vertex's output will be.
+    unique_vertices.clear();
+    if (is_indexed) {
+        if (vertex_slot_of.empty()) {
+            vertex_slot_of.resize(0x10000);
+            vertex_slot_stamp.assign(0x10000, 0);
+        }
+        if (++vertex_stamp == 0) {
+            // The stamp wrapped: forget every draw's entries rather than mistake old for new.
+            std::fill(vertex_slot_stamp.begin(), vertex_slot_stamp.end(), 0);
+            vertex_stamp = 1;
+        }
+        const u16* index_address_16 = reinterpret_cast<const u16*>(index_address_8);
+        vertex_slots.resize(num_vertices);
+        for (u32 index = 0; index < num_vertices; ++index) {
+            const u32 vertex = index_u16 ? index_address_16[index] : index_address_8[index];
+            if (vertex_slot_stamp[vertex] != vertex_stamp) {
+                vertex_slot_stamp[vertex] = vertex_stamp;
+                vertex_slot_of[vertex] = static_cast<u32>(unique_vertices.size());
+                unique_vertices.push_back(vertex);
+            }
+            vertex_slots[index] = vertex_slot_of[vertex];
+        }
+    } else {
+        for (u32 index = 0; index < num_vertices; ++index) {
+            unique_vertices.push_back(index + pipeline.vertex_offset);
+        }
+    }
+
+    // Shade them on every thread. LoadVertex reads only the vertex number, not its index.
+    shaded_vertices.resize(unique_vertices.size());
+    vertex_jobs->Run(
+        static_cast<u32>(unique_vertices.size()), VERTICES_PER_CHUNK, [&](u32 begin, u32 end) {
+            ShaderUnit unit;
+            AttributeBuffer input;
+            for (u32 i = begin; i < end; ++i) {
+                const u32 vertex = unique_vertices[i];
+                loader.LoadVertex(base_address, vertex, vertex, input, input_default_attributes);
+                unit.LoadInput(regs.internal.vs, input);
+                shader_engine->Run(vs_setup, unit);
+                unit.WriteOutput(regs.internal.vs, shaded_vertices[i]);
+            }
+        });
+
+    // Hand them on in the draw's order.
+    for (u32 index = 0; index < num_vertices; ++index) {
+        geometry_pipeline.SubmitVertex(shaded_vertices[is_indexed ? vertex_slots[index] : index]);
+    }
+    return true;
 }
 
 PicaCore::RenderPropertiesGuess PicaCore::GuessCmdRenderProperties(PAddr list, u32 size) {

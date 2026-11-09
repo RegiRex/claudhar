@@ -1,9 +1,12 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #pragma once
 
+#include <memory>
+#include <vector>
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
 #include "video_core/pica/dirty_regs.h"
@@ -24,10 +27,15 @@ namespace VideoCore {
 class RasterizerInterface;
 }
 
+namespace Claudhar::Jobs {
+class ParallelFor;
+}
+
 namespace Pica {
 
 class DebugContext;
 class ShaderEngine;
+class VertexLoader;
 
 class DelayGenerator {
 private:
@@ -142,6 +150,13 @@ private:
     void DrawArrays(bool is_indexed);
 
     void LoadVertices(bool is_indexed);
+
+    /// Claudhar: shades the draw's vertices on several cores, each vertex the draw uses once,
+    /// then hands them to the geometry pipeline in the draw's order, as LoadVertices' loop
+    /// does one at a time. Returns false, having done nothing, for a draw that loop handles
+    /// better: a small one, one a geometry shader takes indices for, or one being debugged.
+    bool LoadVerticesInParallel(bool is_indexed, const VertexLoader& loader, PAddr base_address,
+                                const u8* index_address_8, bool index_u16);
 
 public:
     union Regs {
@@ -411,6 +426,17 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
+
+    // Claudhar: LoadVerticesInParallel's threads, and its buffers, kept between draws so a
+    // draw does not allocate. The slot table maps the vertices of an indexed draw to their
+    // place in shaded_vertices; an entry is valid when its stamp is the current draw's.
+    std::unique_ptr<Claudhar::Jobs::ParallelFor> vertex_jobs;
+    std::vector<u32> unique_vertices;
+    std::vector<u32> vertex_slots;
+    std::vector<AttributeBuffer> shaded_vertices;
+    std::vector<u32> vertex_slot_of;
+    std::vector<u32> vertex_slot_stamp;
+    u32 vertex_stamp = 0;
 };
 
 #define GPU_REG_INDEX(field_name) (offsetof(Pica::PicaCore::Regs, field_name) / sizeof(u32))

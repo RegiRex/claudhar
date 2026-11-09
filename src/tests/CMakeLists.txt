@@ -1,4 +1,5 @@
 add_executable(tests
+    claudhar/parallel_for.cpp
     common/bit_field.cpp
     common/file_util.cpp
     common/param_package.cpp
