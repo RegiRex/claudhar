@@ -284,6 +284,7 @@ void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loadi
 void PipelineCache::LoadDriverPipelineDiskCache(
     const std::atomic_bool& stop_loading, const VideoCore::DiskResourceLoadCallback& callback) {
     vk::PipelineCacheCreateInfo cache_info{};
+    driver_cache_loaded = false; // Claudhar: set below once a file's contents are in use.
 
     if (callback) {
         callback(VideoCore::LoadCallbackStage::Build, 0, 1, "Driver Pipeline Cache");
@@ -356,6 +357,9 @@ void PipelineCache::LoadDriverPipelineDiskCache(
     cache_info.initialDataSize = cache_file_size;
     cache_info.pInitialData = cache_data.data();
     load_cache(true);
+    // Claudhar: load_cache clears the data when the driver refused it and fell back to an
+    // empty cache.
+    driver_cache_loaded = driver_pipeline_cache && cache_info.initialDataSize != 0;
 }
 
 void PipelineCache::SaveDriverPipelineDiskCache() {
@@ -614,7 +618,7 @@ bool PipelineCache::TryBuildCached(GraphicsPipeline* pipeline) {
     }
     const auto start = std::chrono::steady_clock::now();
     const bool built = pipeline->TryBuildCached();
-    ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start);
+    ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start, built);
     return built;
 }
 
@@ -673,7 +677,7 @@ GraphicsPipeline* PipelineCache::UberPipeline(const PipelineInfo& info) {
         }
         const auto start = std::chrono::steady_clock::now();
         pipeline->Build();
-        ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start);
+        ledger.CountPipelineCreation(std::chrono::steady_clock::now() - start, true);
     }
     return pipeline;
 }

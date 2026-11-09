@@ -343,6 +343,14 @@ public:
         return driver_cache_missed;
     }
 
+    /// Claudhar: for a pipeline the driver cache cannot hold, such as one no earlier session
+    /// created: TryBuildCached then returns false without asking the driver. On Qualcomm's
+    /// driver a lookup that finds nothing still took 1.7 ms on average and up to 38 ms on the
+    /// emulation thread. Emulation thread only.
+    void SkipDriverCacheLookup() noexcept {
+        driver_cache_missed = true;
+    }
+
     bool Build(bool fail_on_compile_required = false);
 
     [[nodiscard]] vk::Pipeline Handle() const noexcept {

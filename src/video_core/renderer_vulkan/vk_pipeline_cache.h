@@ -232,6 +232,9 @@ private:
 
     Pica::Shader::Profile profile{};
     vk::UniquePipelineCache driver_pipeline_cache;
+    /// Claudhar: true when driver_pipeline_cache started from this title's file rather than
+    /// empty, so it can hold pipelines of earlier sessions; see SkipDriverCacheLookup.
+    bool driver_cache_loaded{};
     vk::UniquePipelineLayout pipeline_layout;
     std::size_t num_worker_threads;
     Common::ThreadWorker pipeline_workers;

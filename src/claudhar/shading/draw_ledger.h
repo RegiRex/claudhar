@@ -67,8 +67,8 @@ struct DrawLedger {
     }
 
     /// Adds one attempt to create a pipeline from the driver cache on the emulation thread,
-    /// and the time it took.
-    void CountPipelineCreation(Clock::duration time);
+    /// the time it took and whether it gave a pipeline.
+    void CountPipelineCreation(Clock::duration time, bool created);
 
     /// Marks the end of a frame. Called once per frame from TickFrame.
     void CountFrame();
@@ -101,6 +101,7 @@ private:
     double slowest_second = 0.0;   ///< Lowest speed of a whole second, 0 before the first.
     Clock::duration cpu_vertex_time{};
     u32 pipeline_creations = 0;
+    u32 pipelines_created = 0;       ///< Those that gave a pipeline; the rest found nothing.
     u32 slow_pipeline_creations = 0; ///< Those over 2 ms.
     Clock::duration pipeline_time{};
     Clock::duration slowest_pipeline{};

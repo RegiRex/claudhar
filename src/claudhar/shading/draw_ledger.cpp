@@ -36,8 +36,9 @@ void MarkEmulationPaused() {
     paused.store(true, std::memory_order_relaxed);
 }
 
-void DrawLedger::CountPipelineCreation(Clock::duration time) {
+void DrawLedger::CountPipelineCreation(Clock::duration time, bool created) {
     ++pipeline_creations;
+    pipelines_created += created;
     slow_pipeline_creations += time > std::chrono::milliseconds{2};
     pipeline_time += time;
     slowest_pipeline = std::max(slowest_pipeline, time);
@@ -84,11 +85,12 @@ std::string DrawLedger::Summary() const {
 std::string DrawLedger::Timings() const {
     return fmt::format("{} frames in {:.1f} s, speed {:.0f}%, slowest second {:.0f}%; slowest "
                        "frame {:.0f} ms, {} over 50 ms; CPU vertex shading of fallbacks {:.0f} "
-                       "ms; pipeline cache lookups on the emulation thread {} in {:.1f} ms, {} "
-                       "over 2 ms, slowest {:.1f} ms",
+                       "ms; pipeline cache lookups on the emulation thread {} ({} found) in "
+                       "{:.1f} ms, {} over 2 ms, slowest {:.1f} ms",
                        frames, Ms(frame_time) / 1000.0, Speed(frames, frame_time), slowest_second,
                        Ms(slowest_frame), slow_frames, Ms(cpu_vertex_time), pipeline_creations,
-                       Ms(pipeline_time), slow_pipeline_creations, Ms(slowest_pipeline));
+                       pipelines_created, Ms(pipeline_time), slow_pipeline_creations,
+                       Ms(slowest_pipeline));
 }
 
 bool DrawLedger::LogPeriodically(std::chrono::seconds interval) {
@@ -113,7 +115,8 @@ bool DrawLedger::LogPeriodically(std::chrono::seconds interval) {
     LOG_INFO(Render_Vulkan, "Claudhar timing: {}", Timings());
     last_log = now;
     logged_drawn = Drawn();
-    frames = slow_frames = second_frames = pipeline_creations = slow_pipeline_creations = 0;
+    frames = slow_frames = second_frames = pipeline_creations = pipelines_created =
+        slow_pipeline_creations = 0;
     frame_time = slowest_frame = second_time = cpu_vertex_time = pipeline_time =
         slowest_pipeline = {};
     slowest_second = 0.0;

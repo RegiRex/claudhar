@@ -255,6 +255,11 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
         it.value() = std::make_unique<GraphicsPipeline>(
             parent.instance, parent.renderpass_cache, info, *parent.driver_pipeline_cache,
             *parent.pipeline_layout, parent.current_shaders, &parent.pipeline_workers);
+        // Claudhar: InitPLCache created every pipeline this title's record holds and tried
+        // each in the driver cache. One created here was not in the record, so no earlier
+        // session built it and the driver cache cannot have it: it goes straight to a
+        // background build instead of a lookup on the emulation thread.
+        it.value()->SkipDriverCacheLookup();
     }
 
     if (known_graphic_pipelines.emplace(hash).second) {
@@ -288,6 +293,11 @@ GraphicsPipeline* ShaderDiskCache::GetGpuVertexUberPipeline(const PipelineInfo& 
         it.value() = std::make_unique<GraphicsPipeline>(parent.instance, parent.renderpass_cache,
                                                         info, *parent.driver_pipeline_cache,
                                                         *parent.pipeline_layout, stages, worker);
+        // These are not in the record, but an earlier session may have built one into the
+        // driver cache. Without a driver cache file there is nothing to find.
+        if (!parent.driver_cache_loaded) {
+            it.value()->SkipDriverCacheLookup();
+        }
     }
     return it.value().get();
 }
