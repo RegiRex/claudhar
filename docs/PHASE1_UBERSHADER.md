@@ -95,9 +95,40 @@ the internal resolution.
 - **One driver cache lookup per pipeline.** A pipeline the driver cache turned down is not
   looked up again on the emulation thread; only its background build can make it.
 
+### Lookups, CPU vertex shading on several cores, and where frames go (0.0.7-alpha)
+
+- **No lookup that cannot find anything.** The disk cache creates every pipeline in the
+  title's record at load and tries each in the driver cache then. A pipeline first seen
+  during play is not in the record, so no earlier session built it and the driver cache
+  cannot hold it; it now goes straight to a background build
+  (`GraphicsPipeline::SkipDriverCacheLookup`). A GPU-vertex ubershader pipeline, which is
+  not recorded, skips the lookup only when no driver cache file was loaded. On Qualcomm's
+  driver a lookup that found nothing took 1.7 ms on average and up to 38 ms. The timing
+  line now says how many lookups found a pipeline.
+- **CPU vertex shading on several cores.** A CPU-vertex draw of 64 vertices or more has
+  each vertex it uses shaded once, by the emulation thread and three workers (half the
+  cores less one; `PicaCore::LoadVerticesInParallel`), which claim 16 vertices at a time
+  so fast and slow cores share the work. The outputs then go to the geometry pipeline in
+  the draw's order on the emulation thread. A vertex shader's output depends only on its
+  vertex, and Azahar's 64-entry vertex cache only saved shading a vertex again, so the
+  geometry shader, primitive assembly and the rasterizer get what the loop gave them.
+  Smaller draws, geometry shaders that take indices and debugged draws keep Azahar's loop.
+  The parallel loop (`claudhar/jobs`) is the start of Phase 3's job system. Its first
+  version had a race: a worker late from one loop could read the next loop's chunk count
+  while the claim was still the old loop's and claim a chunk that did not exist, which hung
+  the caller after a few hundred loops. A host stress test found it; the caller now
+  changes a loop only while no worker is in one.
+- **A frame-time breakdown** (`claudhar/diagnostics/frame_profile.h`), logged with the
+  timings; see Counters.
+- **Crash reports for Android ending a game.** The report covered native crashes, Java
+  crashes and ANRs only. Android ending the app for another reason, such as low memory,
+  is now reported too when the session's log shows it ended inside a game. The memory line
+  adds the process's resident memory, which includes the GPU driver's shader compiler, and
+  the device's available memory.
+
 ## Counters
 
-Every 10 seconds the log has two lines like
+Every 10 seconds the log has lines like
 
 ```
 Claudhar shading: requested 120654, drawn 120344 (specialized GPU-vertex 101200, specialized
@@ -106,9 +137,17 @@ invalid 0, CPU-vertex fallbacks 120, building: specialized 4, GPU-vertex ubersha
 compile_waits 0, skipped 0
 Claudhar timing: 897 frames in 10.0 s, speed 150%, slowest second 121%; slowest frame 21
 ms, 0 over 50 ms; CPU vertex shading of fallbacks 35 ms; pipeline cache lookups on the
-emulation thread 41 in 9.6 ms, 0 over 2 ms, slowest 0.4 ms
-Claudhar memory: GPU 1843 MiB in use of a 11456 MiB budget
+emulation thread 41 (38 found) in 9.6 ms, 0 over 2 ms, slowest 0.4 ms
+Claudhar frame: 11.1 ms per frame: guest CPU and services 6.0, GPU commands 3.9 (CPU
+vertex shading 0.4 for 310 vertices), presenting 1.1, frame limiter 0.1; waits per frame
+for the GPU 0.05 ms (0.1 times), the Vulkan worker 0.40 ms, a free presentation frame 0.10
+ms; per frame 14.2 render passes (6.1 on the same target as the one before), 3.1 texture
+uploads, 0.02 downloads (16 KiB)
+Claudhar memory: GPU 224 MiB allocated by the renderer (no driver total); process 1630 MiB
+resident, device 9504 MiB available
 ```
+
+(The figures are an illustration of the format, not a measurement.)
 
 `compile_waits` and `skipped` must be 0. Every draw the renderer is asked for is counted
 as requested and again by its outcome; `skipped` is the difference, so a draw dropped by
@@ -124,9 +163,21 @@ second), so frames per second give the emulation speed; the slowest whole second
 short slowdown that the average hides. Time the emulation spent paused is left out
 (0.0.3-alpha; before, a pause showed as one long frame). Then come the time the emulation
 thread spent shading fallback draws' vertices, and the pipelines it created itself from the
-driver cache, which should each take well under a millisecond. The memory line gives the
-GPU memory the process holds, from the driver (`VK_EXT_memory_budget`), or the renderer's
-own allocations where the driver does not report it.
+driver cache, which should each take well under a millisecond.
+
+The frame line (0.0.7-alpha) splits the same frames' time on the emulation thread, which
+until Phase 2 runs the whole 3DS: the GPU commands the game asked for (command lists, memory
+fills, display transfers, texture copies, DMA), with the CPU vertex shading inside them;
+presenting the frame, without the frame limiter's sleep, which is time to spare; and the
+rest, which is the guest CPU with the kernel and services. The waits are inside those
+phases: for the host GPU to finish work (texture downloads, full stream buffers), for the
+Vulkan worker thread to record what is queued (once per frame) and for a free presentation
+frame. Render passes count because a tiled phone GPU loads and stores a pass's targets,
+which costs more the higher the resolution; "on the same target" counts passes that resume
+the framebuffer of the pass before, ended by a transfer or a different draw area. The
+memory line gives the GPU memory the process holds, from the driver
+(`VK_EXT_memory_budget`), or the renderer's own allocations where the driver does not
+report it, then the process's resident memory and the device's available memory.
 
 The log file is flushed whenever its queue runs empty (0.0.2-alpha), so after a crash it
 ends where the game stopped. It used to be flushed only at errors.
@@ -285,3 +336,34 @@ a vertex shader interpreter on the GPU, which needs no compile per vertex shader
 one for the PS3), and shading CPU-vertex draws on several cores, planned for Phase 3.
 Turnip, which compiled Sonic's pipelines in about 30 ms, may also build Dark Moon's far
 faster; that is a test to run.
+
+### 0.0.6-alpha on the Thor (2026-11-09)
+
+With turbo (a 400% speed cap); every ledger line had `compile_waits 0` and `skipped 0`. The
+owner's view: Sonic ran beautifully; Fire Emblem Awakening was excellent but still fell
+sharply in battles; Xenoblade at 2x was good but not always at full speed, and at 4x ran at
+50–75%; Dark Moon crashed. There was no Fire Emblem session in this log.
+
+- **Sonic at 4x on Turnip** with Prepare graphics before starting: 119–244% from the first
+  10 seconds; the only slow stretch was the first 20 seconds of racing (379 ms of CPU
+  vertex shading in one interval).
+- **Xenoblade at 2x on Qualcomm's driver**, three runs, the first and third after deleting
+  the game's shader cache. In the cold runs, driver cache lookups on the emulation thread
+  took up to 638 ms of a 10-second interval (365 lookups, 70 over 2 ms, the slowest 38 ms),
+  and 184–330 ms in others. None could have found anything, since the cache had just been
+  deleted; 0.0.7 skips them. The warm run, with a 2,205 KB driver cache, had at most 55 ms.
+  Late in the third run, with no shader work at all (no lookups, fallbacks or builds), the
+  game ran at 85–116%; earlier scenes reached 130–380%.
+- **Dark Moon at 2x on Qualcomm's driver**, cold: 15% after the first interval, with CPU
+  vertex shading taking 4.2–8.2 s of every 10 s. The queue of GPU-vertex ubershader
+  pipelines shrank by 7–13 per 10 seconds (38, 31, 20, 7), against about 5 in 0.0.5, and
+  the share of draws drawn by specialized pipelines rose from 2% to 72% in 40 seconds.
+  Then the log stops, 41 seconds into the game, with no exit summary and no error, and no
+  crash report followed: Android ended the process for a reason the report did not cover,
+  low memory being the likeliest. 0.0.7 reports those and logs the process's memory.
+
+What it means: the cold-start costs that remain on the emulation thread are CPU vertex
+shading and, until 0.0.7, pointless lookups; 0.0.7 spreads the first over four threads and
+removes the second. Xenoblade's limit at 2x, and what it loses at 4x, is not shader work;
+0.0.7's frame line shows whether it is the guest CPU, the GPU commands or waits for the
+GPU.

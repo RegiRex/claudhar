@@ -219,7 +219,10 @@ Vulkan recorder thread (big core) -> GPU          Presenter thread (small core) 
   the 16.7 ms budget, so clocks rise before frames run late.
 - Hard core pinning is used only if measurements show it helps.
 - There is one job system. No subsystem creates its own thread pool. That avoids the
-  roughly 35 overlapping threads Uberhar reached.
+  roughly 35 overlapping threads Uberhar reached. Its first part, the parallel loop that
+  shades CPU-vertex draws (`src/claudhar/jobs`), landed early, in 0.0.7-alpha, for Dark
+  Moon's cold start; Phase 3 grows it into the job system and moves Azahar's compile
+  thread pools onto it.
 
 ### 5.3 Later: guest cores on separate threads (Phase 8)
 
