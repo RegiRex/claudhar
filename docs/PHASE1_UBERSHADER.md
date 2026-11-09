@@ -140,9 +140,9 @@ ms, 0 over 50 ms; CPU vertex shading of fallbacks 35 ms; pipeline cache lookups 
 emulation thread 41 (38 found) in 9.6 ms, 0 over 2 ms, slowest 0.4 ms
 Claudhar frame: 11.1 ms per frame: guest CPU and services 6.0, GPU commands 3.9 (CPU
 vertex shading 0.4 for 310 vertices), presenting 1.1, frame limiter 0.1; waits per frame
-for the GPU 0.05 ms (0.1 times), the Vulkan worker 0.40 ms, a free presentation frame 0.10
-ms; per frame 14.2 render passes (6.1 on the same target as the one before), 3.1 texture
-uploads, 0.02 downloads (16 KiB)
+for the GPU 0.05 ms, the Vulkan worker 0.40 ms, a free presentation frame 0.10 ms; per
+frame 14.2 render passes (6.1 on the same target as the one before) and 3.1 texture
+uploads; in all 12 GPU waits and 3 texture downloads (48 KiB)
 Claudhar memory: GPU 224 MiB allocated by the renderer (no driver total); process 1630 MiB
 resident, device 9504 MiB available
 ```
@@ -174,7 +174,9 @@ phases: for the host GPU to finish work (texture downloads, full stream buffers)
 Vulkan worker thread to record what is queued (once per frame) and for a free presentation
 frame. Render passes count because a tiled phone GPU loads and stores a pass's targets,
 which costs more the higher the resolution; "on the same target" counts passes that resume
-the framebuffer of the pass before, ended by a transfer or a different draw area. The
+the framebuffer of the pass before, ended by a transfer or a different draw area. Waits
+for the GPU and texture downloads are rare, so they are counted over the whole interval
+rather than per frame; each download waits for the GPU to finish everything before it. The
 memory line gives the GPU memory the process holds, from the driver
 (`VK_EXT_memory_budget`), or the renderer's own allocations where the driver does not
 report it, then the process's resident memory and the device's available memory.

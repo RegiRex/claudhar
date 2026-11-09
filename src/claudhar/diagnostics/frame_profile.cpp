@@ -23,7 +23,6 @@ std::string FrameProfile::TakeSummary(u32 frames, Clock::duration frame_time) {
     const double n = std::max(frames, 1u);
     const auto phase = [&](Phase p) { return ms(phases[static_cast<std::size_t>(p)]); };
     const auto wait = [&](WaitFor w) { return ms(waits[static_cast<std::size_t>(w)]) / n; };
-    const auto times = [&](WaitFor w) { return wait_counts[static_cast<std::size_t>(w)] / n; };
 
     // The phases are summed over the same frames as frame_time, so the rest of it is the
     // guest's. A frame left out of frame_time for spanning a pause can make that slightly
@@ -33,17 +32,19 @@ std::string FrameProfile::TakeSummary(u32 frames, Clock::duration frame_time) {
     const double limiter = phase(Phase::FrameLimiter);
     const double guest = std::max(ms(frame_time) - gpu - presenting, 0.0);
 
+    // Rare events (waits for the GPU, downloads) are totals: a download every few seconds,
+    // each a full wait for the GPU, would round to nothing per frame.
     std::string summary = fmt::format(
         "{:.1f} ms per frame: guest CPU and services {:.1f}, GPU commands {:.1f} (CPU vertex "
-        "shading {:.1f} for {:.0f} vertices), presenting {:.1f}, frame limiter {:.1f}; waits per "
-        "frame for the GPU {:.2f} ms ({:.1f} times), the Vulkan worker {:.2f} ms, a free "
-        "presentation frame {:.2f} ms; per frame {:.1f} render passes ({:.1f} on the same target "
-        "as the one "
-        "before), {:.1f} texture uploads, {:.2f} downloads ({:.0f} KiB)",
+        "shading {:.1f} for {:.0f} vertices), presenting {:.1f}, frame limiter {:.1f}; waits "
+        "per frame for the GPU {:.2f} ms, the Vulkan worker {:.2f} ms, a free presentation "
+        "frame {:.2f} ms; per frame {:.1f} render passes ({:.1f} on the same target as the one "
+        "before) and {:.1f} texture uploads; in all {} GPU waits and {} texture downloads "
+        "({} KiB)",
         ms(frame_time) / n, guest / n, gpu / n, phase(Phase::CpuVertices) / n, cpu_vertices / n,
-        (presenting - limiter) / n, limiter / n, wait(WaitFor::Gpu), times(WaitFor::Gpu),
-        wait(WaitFor::VulkanWorker), wait(WaitFor::PresentFrame), render_passes / n,
-        same_target_passes / n, uploads / n, downloads / n, download_bytes / 1024.0 / n);
+        (presenting - limiter) / n, limiter / n, wait(WaitFor::Gpu), wait(WaitFor::VulkanWorker),
+        wait(WaitFor::PresentFrame), render_passes / n, same_target_passes / n, uploads / n,
+        wait_counts[static_cast<std::size_t>(WaitFor::Gpu)], downloads, download_bytes >> 10);
     Reset();
     return summary;
 }
