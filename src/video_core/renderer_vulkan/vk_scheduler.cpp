@@ -1,9 +1,11 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include <mutex>
 #include <utility>
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/microprofile.h"
 #include "common/thread.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -77,6 +79,8 @@ void Scheduler::WaitWorker() {
     }
 
     MICROPROFILE_SCOPE(Vulkan_WaitForWorker);
+    // Claudhar: timed for the frame profile.
+    const Claudhar::Diagnostics::ScopedWait timed{Claudhar::Diagnostics::WaitFor::VulkanWorker};
     DispatchWork();
 
     // Ensure the queue is drained.
@@ -91,6 +95,12 @@ void Scheduler::WaitWorker() {
 }
 
 void Scheduler::Wait(u64 tick) {
+    // Claudhar: a wait for work the GPU has already finished costs nothing and is not one.
+    if (master_semaphore->IsFree(tick)) {
+        return;
+    }
+    // Claudhar: timed for the frame profile.
+    const Claudhar::Diagnostics::ScopedWait timed{Claudhar::Diagnostics::WaitFor::Gpu};
     if (tick >= master_semaphore->CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         Flush();

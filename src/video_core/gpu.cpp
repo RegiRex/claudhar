@@ -1,7 +1,9 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/archives.h"
 #include "common/hacks/hack_manager.h"
 #include "common/microprofile.h"
@@ -148,6 +150,8 @@ void GPU::Execute(const Service::GSP::Command& command) {
 
     switch (command.id) {
     case CommandId::RequestDma: {
+        // Claudhar: timed as GPU work for the frame profile.
+        const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::GpuCommands};
         impl->system.Memory().RasterizerFlushVirtualRegion(
             command.dma_request.source_address, command.dma_request.size, Memory::FlushMode::Flush);
         impl->system.Memory().RasterizerFlushVirtualRegion(command.dma_request.dest_address,
@@ -403,6 +407,8 @@ void GPU::SubmitCmdList(u32 index) {
     }
 
     MICROPROFILE_SCOPE(GPU_CmdlistProcessing);
+    // Claudhar: timed as GPU work for the frame profile.
+    const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::GpuCommands};
 
     // Forward command list processing to the PICA core.
     const PAddr addr = config.GetPhysicalAddress(index);
@@ -418,6 +424,8 @@ void GPU::MemoryFill(u32 index, u32 intr_index) {
     if (!config.trigger) {
         return;
     }
+    // Claudhar: timed as GPU work for the frame profile.
+    const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::GpuCommands};
 
     // Perform memory fill.
     if (!impl->rasterizer->AccelerateFill(config)) {
@@ -453,6 +461,8 @@ void GPU::MemoryTransfer() {
     }
 
     MICROPROFILE_SCOPE(GPU_DisplayTransfer);
+    // Claudhar: timed as GPU work for the frame profile.
+    const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::GpuCommands};
 
     // Notify debugger about the display transfer.
     if (impl->debug_context) {
@@ -491,7 +501,11 @@ void GPU::VBlankCallback(std::uintptr_t user_data, s64 cycles_late) {
     impl->signal_interrupt(Service::GSP::InterruptId::PDC1, 0);
 
     // Present renderered frame.
-    impl->renderer->SwapBuffers();
+    {
+        // Claudhar: presenting, for the frame profile.
+        const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::Presenting};
+        impl->renderer->SwapBuffers();
+    }
 
     // Reschedule recurrent event
     impl->timing.ScheduleEvent(FRAME_TICKS - cycles_late, impl->vblank_event);

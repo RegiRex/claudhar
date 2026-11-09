@@ -1,7 +1,9 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/arch.h"
 #include "common/archives.h"
 #include "common/microprofile.h"
@@ -1095,6 +1097,10 @@ void PicaCore::DrawArrays(bool is_indexed) {
 }
 
 void PicaCore::LoadVertices(bool is_indexed) {
+    // Claudhar: shading vertices on the CPU, timed and counted for the frame profile.
+    const Claudhar::Diagnostics::ScopedPhase timed{Claudhar::Diagnostics::Phase::CpuVertices};
+    Claudhar::Diagnostics::Profile().CountVertices(regs.internal.pipeline.num_vertices);
+
     // Read and validate vertex information from the loaders
     const auto& pipeline = regs.internal.pipeline;
     const PAddr base_address = pipeline.vertex_attributes.GetPhysicalBaseAddress();

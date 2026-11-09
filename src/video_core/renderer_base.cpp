@@ -1,7 +1,9 @@
 // Copyright 2015-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
@@ -47,7 +49,11 @@ void RendererBase::EndFrame() {
 
     render_window.PollEvents();
 
-    system.frame_limiter.DoFrameLimiting(system.CoreTiming().GetGlobalTimeUs());
+    {
+        // Claudhar: the limiter's sleep is time to spare, kept apart in the frame profile.
+        const Claudhar::Diagnostics::ScopedPhase phase{Claudhar::Diagnostics::Phase::FrameLimiter};
+        system.frame_limiter.DoFrameLimiting(system.CoreTiming().GetGlobalTimeUs());
+    }
     system.perf_stats->BeginSystemFrame();
 }
 

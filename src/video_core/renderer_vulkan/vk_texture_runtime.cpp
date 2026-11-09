@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
 
@@ -17,6 +18,7 @@
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/literals.h"
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
@@ -866,6 +868,7 @@ Surface::Surface(TextureRuntime& runtime_, const VideoCore::SurfaceBase& surface
 
 void Surface::Upload(const VideoCore::BufferTextureCopy& upload,
                      const VideoCore::StagingData& staging) {
+    Claudhar::Diagnostics::Profile().CountUpload(); // Claudhar: for the frame profile.
     runtime.renderpass_cache.EndRendering();
 
     const RecordParams params = {
@@ -1028,6 +1031,8 @@ void Surface::UploadCustom(const VideoCore::Material* material, u32 level) {
 
 void Surface::Download(const VideoCore::BufferTextureCopy& download,
                        const VideoCore::StagingData& staging) {
+    // Claudhar: counted for the frame profile; the Finish below is timed as a GPU wait.
+    Claudhar::Diagnostics::Profile().CountDownload(staging.size);
     SCOPE_EXIT({
         scheduler.Finish();
         runtime.download_buffer.Commit(staging.size);

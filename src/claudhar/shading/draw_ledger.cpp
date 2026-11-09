@@ -8,6 +8,7 @@
 #include <atomic>
 #include <fmt/format.h>
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "claudhar/shading/draw_ledger.h"
 #include "common/logging/log.h"
 
@@ -49,6 +50,7 @@ void DrawLedger::CountFrame() {
     const bool first = last_frame == Clock::time_point{};
     if (first) {
         last_log = now; // The first timings cover the first frames, not the loading.
+        Diagnostics::Profile().Reset();
     }
     // A frame that spans a pause is not a hitch; leave it out.
     if (!paused.exchange(false, std::memory_order_relaxed) && !first) {
@@ -113,6 +115,9 @@ bool DrawLedger::LogPeriodically(std::chrono::seconds interval) {
     }
     // Claudhar log line: the timings of the same interval.
     LOG_INFO(Render_Vulkan, "Claudhar timing: {}", Timings());
+    // Claudhar log line: where those frames' time went.
+    LOG_INFO(Render_Vulkan, "Claudhar frame: {}",
+             Diagnostics::Profile().TakeSummary(frames, frame_time));
     last_log = now;
     logged_drawn = Drawn();
     frames = slow_frames = second_frames = pipeline_creations = pipelines_created =

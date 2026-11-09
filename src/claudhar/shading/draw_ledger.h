@@ -14,7 +14,8 @@
 // long frames, shading the vertices of fallback draws on the CPU, and creating pipelines
 // from the driver cache. Those timings cover the time since the last log line, leaving out
 // time the emulation spent paused. The renderer presents once per 3DS screen refresh, so
-// frames per second of emulation time give the emulation speed.
+// frames per second of emulation time give the emulation speed. The frame profile
+// (claudhar/diagnostics/frame_profile.h) is logged after them, for the same frames.
 
 #pragma once
 

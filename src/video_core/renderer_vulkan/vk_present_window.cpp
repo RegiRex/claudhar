@@ -1,7 +1,9 @@
 // Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
 #include "common/thread.h"
@@ -246,6 +248,8 @@ void PresentWindow::RecreateFrame(Frame* frame, u32 width, u32 height) {
 
 Frame* PresentWindow::GetRenderFrame() {
     MICROPROFILE_SCOPE(Vulkan_WaitPresent);
+    // Claudhar: timed for the frame profile, with the fence wait below.
+    const Claudhar::Diagnostics::ScopedWait timed{Claudhar::Diagnostics::WaitFor::PresentFrame};
 
     // Wait for free presentation frames
     std::unique_lock lock{free_mutex};

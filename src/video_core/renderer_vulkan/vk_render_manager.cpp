@@ -1,7 +1,9 @@
 // Copyright 2024-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
+// Modified by the Claudhar Project in 2026; changes are marked "Claudhar:".
 
+#include "claudhar/diagnostics/frame_profile.h"
 #include "common/assert.h"
 #include "video_core/rasterizer_cache/pixel_format.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -53,6 +55,9 @@ void RenderManager::BeginRendering(const RenderPass& new_pass) {
     }
 
     EndRendering();
+    // Claudhar: counted for the frame profile. EndRendering keeps the framebuffer of the pass
+    // it ended, so this tells a pass that resumes the same target from a new one.
+    Claudhar::Diagnostics::Profile().CountRenderPass(pass.framebuffer == new_pass.framebuffer);
     scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
         const vk::RenderPassBeginInfo renderpass_begin_info = {
             .renderPass = info.render_pass,
